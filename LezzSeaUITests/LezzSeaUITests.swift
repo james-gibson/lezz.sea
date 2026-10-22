@@ -1,13 +1,13 @@
 //
-//  LabUITests.swift
-//  LabUITests
+//  LezzSeaUITests.swift
+//  LezzSeaUITests
 //
 //  Created by dev on 10/21/26.
 //
 
 import XCTest
 
-final class LabUITests: XCTestCase {
+final class LezzSeaUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

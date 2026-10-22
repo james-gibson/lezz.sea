@@ -1,13 +1,13 @@
 //
-//  LabUITestsLaunchTests.swift
-//  LabUITests
+//  LezzSeaUITestsLaunchTests.swift
+//  LezzSeaUITests
 //
 //  Created by dev on 10/21/26.
 //
 
 import XCTest
 
-final class LabUITestsLaunchTests: XCTestCase {
+final class LezzSeaUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

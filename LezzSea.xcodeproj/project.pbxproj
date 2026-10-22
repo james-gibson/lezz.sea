@@ -12,50 +12,50 @@
 			containerPortal = D7F7F66A3089B9530016E87B /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = D7F7F6713089B9530016E87B;
-			remoteInfo = Lab;
+			remoteInfo = LezzSea;
 		};
 		D7F7F6913089B9540016E87B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = D7F7F66A3089B9530016E87B /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = D7F7F6713089B9530016E87B;
-			remoteInfo = Lab;
+			remoteInfo = LezzSea;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		D7F7F6723089B9530016E87B /* Lab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lab.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D7F7F6863089B9540016E87B /* LabTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D7F7F6903089B9540016E87B /* LabUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LabUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7F7F6723089B9530016E87B /* lezz.sea.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = lezz.sea.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7F7F6863089B9540016E87B /* LezzSeaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LezzSeaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7F7F6903089B9540016E87B /* LezzSeaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LezzSeaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D7F7F6983089B9540016E87B /* Exceptions for "Lab" folder in "Lab" target */ = {
+		D7F7F6983089B9540016E87B /* Exceptions for "LezzSea" folder in "LezzSea" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = D7F7F6713089B9530016E87B /* Lab */;
+			target = D7F7F6713089B9530016E87B /* LezzSea */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		D7F7F6743089B9530016E87B /* Lab */ = {
+		D7F7F6743089B9530016E87B /* LezzSea */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				D7F7F6983089B9540016E87B /* Exceptions for "Lab" folder in "Lab" target */,
+				D7F7F6983089B9540016E87B /* Exceptions for "LezzSea" folder in "LezzSea" target */,
 			);
-			path = Lab;
+			path = LezzSea;
 			sourceTree = "<group>";
 		};
-		D7F7F6893089B9540016E87B /* LabTests */ = {
+		D7F7F6893089B9540016E87B /* LezzSeaTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = LabTests;
+			path = LezzSeaTests;
 			sourceTree = "<group>";
 		};
-		D7F7F6933089B9540016E87B /* LabUITests */ = {
+		D7F7F6933089B9540016E87B /* LezzSeaUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = LabUITests;
+			path = LezzSeaUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -88,9 +88,9 @@
 		D7F7F6693089B9530016E87B = {
 			isa = PBXGroup;
 			children = (
-				D7F7F6743089B9530016E87B /* Lab */,
-				D7F7F6893089B9540016E87B /* LabTests */,
-				D7F7F6933089B9540016E87B /* LabUITests */,
+				D7F7F6743089B9530016E87B /* LezzSea */,
+				D7F7F6893089B9540016E87B /* LezzSeaTests */,
+				D7F7F6933089B9540016E87B /* LezzSeaUITests */,
 				D7F7F6733089B9530016E87B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -98,9 +98,9 @@
 		D7F7F6733089B9530016E87B /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D7F7F6723089B9530016E87B /* Lab.app */,
-				D7F7F6863089B9540016E87B /* LabTests.xctest */,
-				D7F7F6903089B9540016E87B /* LabUITests.xctest */,
+				D7F7F6723089B9530016E87B /* lezz.sea.app */,
+				D7F7F6863089B9540016E87B /* LezzSeaTests.xctest */,
+				D7F7F6903089B9540016E87B /* LezzSeaUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -108,9 +108,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		D7F7F6713089B9530016E87B /* Lab */ = {
+		D7F7F6713089B9530016E87B /* LezzSea */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D7F7F6993089B9540016E87B /* Build configuration list for PBXNativeTarget "Lab" */;
+			buildConfigurationList = D7F7F6993089B9540016E87B /* Build configuration list for PBXNativeTarget "LezzSea" */;
 			buildPhases = (
 				D7F7F66E3089B9530016E87B /* Sources */,
 				D7F7F66F3089B9530016E87B /* Frameworks */,
@@ -121,18 +121,18 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				D7F7F6743089B9530016E87B /* Lab */,
+				D7F7F6743089B9530016E87B /* LezzSea */,
 			);
-			name = Lab;
+			name = LezzSea;
 			packageProductDependencies = (
 			);
-			productName = Lab;
-			productReference = D7F7F6723089B9530016E87B /* Lab.app */;
+			productName = LezzSea;
+			productReference = D7F7F6723089B9530016E87B /* lezz.sea.app */;
 			productType = "com.apple.product-type.application";
 		};
-		D7F7F6853089B9540016E87B /* LabTests */ = {
+		D7F7F6853089B9540016E87B /* LezzSeaTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D7F7F69E3089B9550016E87B /* Build configuration list for PBXNativeTarget "LabTests" */;
+			buildConfigurationList = D7F7F69E3089B9550016E87B /* Build configuration list for PBXNativeTarget "LezzSeaTests" */;
 			buildPhases = (
 				D7F7F6823089B9540016E87B /* Sources */,
 				D7F7F6833089B9540016E87B /* Frameworks */,
@@ -144,18 +144,18 @@
 				D7F7F6883089B9540016E87B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				D7F7F6893089B9540016E87B /* LabTests */,
+				D7F7F6893089B9540016E87B /* LezzSeaTests */,
 			);
-			name = LabTests;
+			name = LezzSeaTests;
 			packageProductDependencies = (
 			);
-			productName = LabTests;
-			productReference = D7F7F6863089B9540016E87B /* LabTests.xctest */;
+			productName = LezzSeaTests;
+			productReference = D7F7F6863089B9540016E87B /* LezzSeaTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		D7F7F68F3089B9540016E87B /* LabUITests */ = {
+		D7F7F68F3089B9540016E87B /* LezzSeaUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D7F7F6A13089B9550016E87B /* Build configuration list for PBXNativeTarget "LabUITests" */;
+			buildConfigurationList = D7F7F6A13089B9550016E87B /* Build configuration list for PBXNativeTarget "LezzSeaUITests" */;
 			buildPhases = (
 				D7F7F68C3089B9540016E87B /* Sources */,
 				D7F7F68D3089B9540016E87B /* Frameworks */,
@@ -167,13 +167,13 @@
 				D7F7F6923089B9540016E87B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				D7F7F6933089B9540016E87B /* LabUITests */,
+				D7F7F6933089B9540016E87B /* LezzSeaUITests */,
 			);
-			name = LabUITests;
+			name = LezzSeaUITests;
 			packageProductDependencies = (
 			);
-			productName = LabUITests;
-			productReference = D7F7F6903089B9540016E87B /* LabUITests.xctest */;
+			productName = LezzSeaUITests;
+			productReference = D7F7F6903089B9540016E87B /* LezzSeaUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -199,7 +199,7 @@
 					};
 				};
 			};
-			buildConfigurationList = D7F7F66D3089B9530016E87B /* Build configuration list for PBXProject "Lab" */;
+			buildConfigurationList = D7F7F66D3089B9530016E87B /* Build configuration list for PBXProject "LezzSea" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -213,9 +213,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				D7F7F6713089B9530016E87B /* Lab */,
-				D7F7F6853089B9540016E87B /* LabTests */,
-				D7F7F68F3089B9540016E87B /* LabUITests */,
+				D7F7F6713089B9530016E87B /* LezzSea */,
+				D7F7F6853089B9540016E87B /* LezzSeaTests */,
+				D7F7F68F3089B9540016E87B /* LezzSeaUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -271,12 +271,12 @@
 /* Begin PBXTargetDependency section */
 		D7F7F6883089B9540016E87B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = D7F7F6713089B9530016E87B /* Lab */;
+			target = D7F7F6713089B9530016E87B /* LezzSea */;
 			targetProxy = D7F7F6873089B9540016E87B /* PBXContainerItemProxy */;
 		};
 		D7F7F6923089B9540016E87B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = D7F7F6713089B9530016E87B /* Lab */;
+			target = D7F7F6713089B9530016E87B /* LezzSea */;
 			targetProxy = D7F7F6913089B9540016E87B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -287,40 +287,25 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Lab/Lab.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"Lab/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"LezzSea/Preview Content\"";
 				DEVELOPMENT_TEAM = 288ZTJGXX9;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Lab/Info.plist;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				"INFOPLIST_KEY_UISupportsDocumentBrowser[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UISupportsDocumentBrowser[sdk=iphonesimulator*]" = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				INFOPLIST_FILE = LezzSea/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.8;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.Lab;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LezzSea;
+				PRODUCT_MODULE_NAME = LezzSea;
+				PRODUCT_NAME = "lezz.sea";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 2.2;
 			};
 			name = Debug;
 		};
@@ -329,40 +314,25 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Lab/Lab.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"Lab/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"LezzSea/Preview Content\"";
 				DEVELOPMENT_TEAM = 288ZTJGXX9;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Lab/Info.plist;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				"INFOPLIST_KEY_UISupportsDocumentBrowser[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UISupportsDocumentBrowser[sdk=iphonesimulator*]" = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				INFOPLIST_FILE = LezzSea/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.8;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.Lab;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LezzSea;
+				PRODUCT_MODULE_NAME = LezzSea;
+				PRODUCT_NAME = "lezz.sea";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 2.2;
 			};
 			name = Release;
 		};
@@ -488,18 +458,15 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 288ZTJGXX9;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				MACOSX_DEPLOYMENT_TARGET = 14.8;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LabTests;
+				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LezzSeaTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lab.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lab";
-				XROS_DEPLOYMENT_TARGET = 2.2;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/lezz.sea.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/lezz.sea";
 			};
 			name = Debug;
 		};
@@ -511,18 +478,15 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 288ZTJGXX9;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				MACOSX_DEPLOYMENT_TARGET = 14.8;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LabTests;
+				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LezzSeaTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lab.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lab";
-				XROS_DEPLOYMENT_TARGET = 2.2;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/lezz.sea.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/lezz.sea";
 			};
 			name = Release;
 		};
@@ -533,18 +497,15 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 288ZTJGXX9;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				MACOSX_DEPLOYMENT_TARGET = 14.8;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LabUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LezzSeaUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = Lab;
-				XROS_DEPLOYMENT_TARGET = 2.2;
+				TEST_TARGET_NAME = LezzSea;
 			};
 			name = Debug;
 		};
@@ -555,25 +516,22 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 288ZTJGXX9;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				MACOSX_DEPLOYMENT_TARGET = 14.8;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LabUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = co.jamesgibson.LezzSeaUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = Lab;
-				XROS_DEPLOYMENT_TARGET = 2.2;
+				TEST_TARGET_NAME = LezzSea;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		D7F7F66D3089B9530016E87B /* Build configuration list for PBXProject "Lab" */ = {
+		D7F7F66D3089B9530016E87B /* Build configuration list for PBXProject "LezzSea" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D7F7F69C3089B9540016E87B /* Debug */,
@@ -582,7 +540,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D7F7F6993089B9540016E87B /* Build configuration list for PBXNativeTarget "Lab" */ = {
+		D7F7F6993089B9540016E87B /* Build configuration list for PBXNativeTarget "LezzSea" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D7F7F69A3089B9540016E87B /* Debug */,
@@ -591,7 +549,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D7F7F69E3089B9550016E87B /* Build configuration list for PBXNativeTarget "LabTests" */ = {
+		D7F7F69E3089B9550016E87B /* Build configuration list for PBXNativeTarget "LezzSeaTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D7F7F69F3089B9550016E87B /* Debug */,
@@ -600,7 +558,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D7F7F6A13089B9550016E87B /* Build configuration list for PBXNativeTarget "LabUITests" */ = {
+		D7F7F6A13089B9550016E87B /* Build configuration list for PBXNativeTarget "LezzSeaUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D7F7F6A23089B9550016E87B /* Debug */,
