@@ -25,7 +25,7 @@ cluster: the lights it reports, and the MCP traffic it logs, live.
 
 ## Build
 
-macOS 14.8 or later, Xcode 16.
+macOS 14 or later, Xcode 16.
 
 ```sh
 open LezzSea.xcodeproj
