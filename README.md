@@ -45,6 +45,24 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
   -destination 'platform=macOS' test
 ```
 
+## Publish a dev build
+
+Builds are signed on the signing machine and published to the `dev` prerelease;
+CI has no certificate and only verifies what was published.
+
+```sh
+scripts/publish-dev.sh              # add --notarize once credentials are stored
+```
+
+Stable download:
+
+```
+https://github.com/james-gibson/lezz.sea/releases/download/dev/lezz.sea.app.zip
+```
+
+See [docs/publishing.md](docs/publishing.md) for what a publish produces, why it
+archives and exports rather than builds, and what CI verifies.
+
 ## Using it
 
 | Action | Shortcut |
