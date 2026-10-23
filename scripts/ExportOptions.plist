@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Export options for `xcodebuild -exportArchive` — the step that turns an
+  archive into a distributable app.
+
+  Why this file exists at all: `xcodebuild build -configuration Release` signs
+  the app with the Developer ID identity, but as a *development* product — it
+  carries `com.apple.security.get-task-allow` (debugger attach) and no secure
+  timestamp. Both are notarization blockers, and neither is visible from a
+  successful build. Exporting with `method = developer-id` re-signs for
+  distribution: hardened runtime, secure timestamp, no get-task-allow.
+
+  `signingStyle = manual` with the certificate name matches the Release
+  configuration, which names the Developer ID identity explicitly. There is no
+  provisioning profile: a Developer ID macOS app distributed outside the App
+  Store does not need one.
+-->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>developer-id</string>
+	<key>destination</key>
+	<string>export</string>
+	<key>teamID</key>
+	<string>288ZTJGXX9</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
+</dict>
+</plist>

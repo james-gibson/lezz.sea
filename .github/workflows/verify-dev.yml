@@ -1,0 +1,92 @@
+name: Verify dev build
+
+# This workflow cannot sign, and does not try: the Developer ID certificate is
+# on the maintainer's machine and never enters CI. Its job is the opposite one —
+# to prove that the asset already published to the `dev` release really is
+# signed by that identity, with the hardened runtime, a secure timestamp, a
+# matching sha256, and (when dev.json says so) a stapled notarization ticket.
+#
+# scripts/publish-dev.sh dispatches this after every upload. The same verifier,
+# scripts/verify-bundle.sh, runs locally before the upload, so a publish is
+# judged by one piece of code in two places.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag holding the dev assets
+        required: false
+        default: dev
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify published asset
+    runs-on: macos-15
+    # Only the dev channel is verified here; a tagged release is a different
+    # promise and not this workflow's subject.
+    if: github.event_name == 'workflow_dispatch' || github.event.release.tag_name == 'dev'
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the published assets
+        run: |
+          gh release download "$TAG" \
+            --pattern 'lezz.sea.app.zip' \
+            --pattern 'checksums.txt' \
+            --pattern 'dev.json'
+
+      # The checksum is checked before anything is unpacked: it is the only
+      # guarantee the zip we verify is the zip dev.json describes.
+      - name: Check the published checksum
+        run: |
+          shasum -a 256 -c checksums.txt
+
+      - name: Unpack the bundle
+        run: |
+          ditto -x -k lezz.sea.app.zip .
+
+      - name: Verify the signature
+        run: |
+          if jq -e '.notarized == true' dev.json >/dev/null; then
+            scripts/verify-bundle.sh "lezz.sea.app" --require-notarized
+          else
+            echo "dev.json says notarized=false; verifying a signed-only build"
+            scripts/verify-bundle.sh "lezz.sea.app"
+          fi
+
+      # dev.json is a claim about the bundle. These steps make it a checked
+      # one: the build number, bundle id, authority and checksum in the
+      # manifest must match what is actually inside the zip.
+      - name: Cross-check dev.json against the bundle
+        run: |
+          set -euo pipefail
+
+          plist="lezz.sea.app/Contents/Info.plist"
+          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
+          bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")
+          sha=$(shasum -a 256 lezz.sea.app.zip | awk '{print $1}')
+          authority=$(codesign -dv --verbose=4 lezz.sea.app 2>&1 | sed -n 's/^Authority=//p' | head -1)
+
+          check() {
+            if [ "$2" != "$3" ]; then
+              echo "mismatch: dev.json $1 is '$2', the asset says '$3'" >&2
+              exit 1
+            fi
+            echo "ok: $1 = $2"
+          }
+
+          check build "$(jq -r .build dev.json)" "$build"
+          check bundleId "$(jq -r .bundleId dev.json)" "$bundle_id"
+          check sha256 "$(jq -r .sha256 dev.json)" "$sha"
+          check authority "$(jq -r .authority dev.json)" "$authority"
+          check hardenedRuntime "$(jq -r .hardenedRuntime dev.json)" "true"
