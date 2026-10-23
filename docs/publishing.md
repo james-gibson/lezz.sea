@@ -26,8 +26,10 @@ https://github.com/james-gibson/lezz.sea/releases/download/dev/dev.json
 | `dev.json` | build identity: release, build, commit, commit dirtiness, team, authority, notarized, sha256, size, time |
 
 and, from a clean tree, a lightweight tag `dev-<build>` on the published commit.
-`dev.json` is the machine-readable record of what is live right now, because the
-assets themselves are replaced on the next publish.
+The `dev` tag itself is force-moved to that commit on every publish: it is a
+channel pointer, not history, while the `dev-<build>` tags are the per-build
+record. `dev.json` is the machine-readable record of what is live right now,
+because the assets themselves are replaced on the next publish.
 
 ## Why the build is an archive + export
 

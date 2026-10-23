@@ -102,6 +102,8 @@ fi
 
 BUILD=$(date -u +%Y%m%d%H%M%S)
 VERSION=$(grep -m1 'MARKETING_VERSION' "$PROJECT/project.pbxproj" | sed -E 's/.*= *([^;]+);/\1/')
+[ -n "$VERSION" ] || die "could not read MARKETING_VERSION from $PROJECT/project.pbxproj"
+REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 COMMIT=$(git rev-parse HEAD)
 SHORT=$(git rev-parse --short=12 HEAD)
 RELEASE="$VERSION-dev.$BUILD"
@@ -117,8 +119,11 @@ mkdir -p "$WORK"
 # Archive + export, not build. `xcodebuild build` signs a development product
 # (get-task-allow, no secure timestamp); exporting with method=developer-id
 # re-signs for distribution. scripts/verify-bundle.sh enforces the difference.
-say "building $RELEASE from $SHORT${DIRTY:+ }"
-[ "$DIRTY" = true ] && say "  (dirty tree: $SHORT is not the build)"
+if [ "$DIRTY" = true ]; then
+  say "building $RELEASE from $SHORT (dirty tree: $SHORT is not the build)"
+else
+  say "building $RELEASE from $SHORT"
+fi
 
 if ! xcodebuild archive \
       -project "$PROJECT" \
@@ -199,6 +204,8 @@ JSON
 printf '%s  %s\n' "$SHA" "lezz.sea.app.zip" > "$WORK/checksums.txt"
 
 cat > "$WORK/notes.md" <<NOTES
+$( [ "$DRY_RUN" -eq 1 ] && printf '> dry run — nothing below is published' )
+
 Dev build **$RELEASE** — commit \`$SHORT\`$( [ "$DIRTY" = true ] && printf ' (dirty tree)' )
 
 | | |
@@ -216,7 +223,7 @@ Download \`lezz.sea.app.zip\`, unzip, and drag **lezz.sea** to /Applications.
 
 These assets are replaced by the next publish, so the download URLs are stable
 while the build behind them is not. \`dev.json\` records the commit and checksum
-of the build currently published; $( [ "$DIRTY" = true ] && printf 'this one was built from a dirty tree and is not tagged.' || printf "the commit is tagged \`dev-$BUILD\`." )
+of the build currently published; $( [ "$DIRTY" = true ] && printf 'this one was built from a dirty tree and is not tagged.' || printf "the commit carries \`dev-$BUILD\`, and the \`dev\` tag points at it." )
 
 Verified by .github/workflows/verify-dev.yml on every publish: bundle id,
 Developer ID authority, team, hardened runtime, secure timestamp, sha256, and —
@@ -241,15 +248,21 @@ gh release upload "$CHANNEL" "$ZIP" "$WORK/checksums.txt" "$WORK/dev.json" --clo
 gh release edit "$CHANNEL" --notes-file "$WORK/notes.md"
 
 if [ "$DIRTY" = false ]; then
-  say "tagging dev-$BUILD"
-  git tag "dev-$BUILD" "$COMMIT"
-  git push origin "dev-$BUILD"
+  say "tagging dev-$BUILD and moving $CHANNEL to the published commit"
+  git tag -f "dev-$BUILD" "$COMMIT" >/dev/null
+  git tag -f "$CHANNEL" "$COMMIT" >/dev/null
+  git push origin "refs/tags/dev-$BUILD"
+  # `dev` is a channel pointer, not a historical record: it must name the build
+  # that is live. The dev-<build> tags are the history. Moving it is the one
+  # force-push in this flow.
+  git push -f origin "refs/tags/$CHANNEL" \
+    || warn "could not move the '$CHANNEL' tag (immutable releases?); the assets are live and dev.json is authoritative"
 else
   warn "no tag: a dirty build has no commit to point at"
 fi
 
-# Ask CI to verify the asset that is now live. Best effort: the workflow may not
-# exist on the default branch yet on the very first publish.
+# Ask CI to verify the asset that is now live. Best effort: on the very first
+# publish the workflow may not be on the default branch yet.
 if gh workflow run verify-dev.yml --ref main -f tag="$CHANNEL" >/dev/null 2>&1; then
   say "verification dispatched: gh run list --workflow=verify-dev.yml"
 else
@@ -257,5 +270,5 @@ else
 fi
 
 say "published $RELEASE"
-printf '  zip      https://github.com/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/releases/download/%s/%s\n' "$CHANNEL" "lezz.sea.app.zip"
-printf '  manifest https://github.com/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/releases/download/%s/dev.json\n' "$CHANNEL"
+printf '  zip      https://github.com/%s/releases/download/%s/lezz.sea.app.zip\n' "$REPO" "$CHANNEL"
+printf '  manifest https://github.com/%s/releases/download/%s/dev.json\n' "$REPO" "$CHANNEL"
