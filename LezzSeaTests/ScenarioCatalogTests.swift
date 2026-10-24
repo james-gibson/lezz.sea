@@ -35,11 +35,23 @@ struct ScenarioCatalogTests {
 
     @Test func everyScenarioIsRunnableAndLinksToItsConfig() {
         for scenario in ScenarioCatalog.all {
-            #expect(scenario.command.hasPrefix("go run ./cmd/ocd-smoke-alarm serve"))
+            #expect(scenario.command.hasPrefix("lezz run ocd-smoke-alarm serve"))
             #expect(scenario.command.contains("configs/samples/\(scenario.file)"))
             #expect(scenario.url.absoluteString.hasSuffix("/configs/samples/\(scenario.file)"))
             #expect(scenario.url.absoluteString.contains(ScenarioCatalog.sourceCommit))
             #expect(!scenario.useCase.isEmpty)
+        }
+    }
+
+    @Test func everyScenarioHasAHealthPortAndAnAdhdBlock() {
+        for scenario in ScenarioCatalog.all {
+            #expect(scenario.healthPort > 0)
+            #expect(scenario.adhdSmokeAlarmBlock.contains("endpoint: \"http://localhost:\(scenario.healthPort)\""))
+
+            let lines = scenario.adhdSmokeAlarmBlock.split(separator: "\n")
+            #expect(lines.first == "smoke_alarm:")
+            #expect(lines.contains { $0.contains("name: \"\(scenario.slug)\"") })
+            #expect(lines.contains { $0.contains("interval: 10s") })
         }
     }
 

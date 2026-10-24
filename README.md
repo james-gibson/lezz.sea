@@ -35,9 +35,9 @@ that cluster's lab can run.
   See `smoke-alarm/docs/adr/0020-the-boundary-is-the-interface.md`.
 - **Scenarios.** smoke-alarm's ready-to-run config catalog, grouped by theme —
   transport, federation, warroom, auth, deployment, discovery — with the
-  documented command for each config and a link to the YAML. Static, and needs
-  no cluster. Selecting a scenario is the step before launching one; identity,
-  key and port belong to the launcher (ADR 0017).
+  `lezz run` command for each config, an adhd `smoke_alarm` block to pair it
+  with a cluster, and a link to the YAML. Static, and needs no cluster.
+  Launching itself is the launcher's job; see `docs/scenarios.md`.
 - **Discovery.** Checks the lezz cluster registry (`:19100/cluster`), probes the
   default adhd endpoint (`127.0.0.1:9090/mcp`), and watches Bonjour for
   `_adhd-isotope._tcp`.
@@ -73,7 +73,7 @@ The UI tests assert the two properties the shipped build broke: the window
 never shrinks below its floor, and the panel switch moves between panes. They
 also check that the lights table's rightmost column stays inside the window,
 that the isotope chart and boundary list render without a cluster, and that the
-scenario filter narrows the catalog.
+scenario filter narrows the catalog and both clipboard payloads are exact.
 
 ## Accessibility
 
@@ -92,7 +92,8 @@ accessible in a screenshot.
   its name, verdict, and channel count; each matrix cell names its mechanism and
   verdict; each boundary row reads as one sentence, including the test that
   holds it or the fact that it is a conformance gap. Each scenario row names
-  its config and its command, and the Copy button says which scenario it copies.
+  its config and its command, the Copy button says which scenario it copies,
+  and the row's action menu names the scenario it belongs to.
 - **Chart and boundary layouts flex.** The isotope chart scrolls inside its
   pane rather than demanding a fixed 720 points, and boundary rows move the
   evidence chip below the invariant when the pane is narrow.
@@ -185,10 +186,12 @@ access to that file; subsequent launches reuse the stored bookmark.
   (Bq, Gy, Sv), no safety function.
 - **The scenario catalog is a suggestion surface, not a launcher.** It is
   transcribed from `smoke-alarm/configs/samples` at a recorded commit, because
-  the YAML is the source of truth. The app copies the documented `go run`
-  command and links to the file; it does not start a process. A launcher has to
-  mint an identity, provision a key and choose a port (ADR 0017), and a viewer
-  should not pretend to do that.
+  the YAML is the source of truth. The app copies the lab's `lezz run` command,
+  pairs adhd with the sample's health port, and links to the file; it does not
+  start a process. The samples' relative state paths and fixed ports need a
+  derived config first, and the sandbox cannot spawn the lab's binary. The
+  launcher path is a loopback address per instance (`127.0.0.N`) and a
+  LaunchServices hand-off to Lezz.app, tracked in #6.
 - **The panel is not a `TabView`.** On macOS a `TabView` with `.tabItem` draws
   its own strip over the content, which overlapped the summary bar. The panel is
   a toolbar picker bound to `AppModel.tab` and the detail pane switches in

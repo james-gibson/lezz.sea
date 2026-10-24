@@ -74,15 +74,37 @@ enum ScenarioCatalog {
         let file: String
         let name: String
         let useCase: String
+        /// The health server's port in the sample, used to pair adhd with it.
+        let healthPort: Int
         let theme: Theme
         /// A caveat worth knowing before running it, when the sample carries one.
         var note: String? = nil
 
         var id: String { file }
 
-        /// The command smoke-alarm documents for a sample, from a checkout.
+        /// The file stem, used as the instance name in an adhd config.
+        var slug: String {
+            file.replacingOccurrences(of: ".yaml", with: "")
+        }
+
+        /// The command the lab uses to start a managed tool. `lezz` owns the
+        /// binary, so the viewer points at the launcher rather than at a Go
+        /// checkout.
         var command: String {
-            "go run ./cmd/ocd-smoke-alarm serve --config=configs/samples/\(file) --mode=foreground"
+            "lezz run ocd-smoke-alarm serve --config=configs/samples/\(file) --mode=foreground"
+        }
+
+        /// The `smoke_alarm` block adhd needs to watch this instance. It is a
+        /// fragment: paste it under the key in adhd's config. `features` and
+        /// `gherkin_files` are a separate decision because they depend on
+        /// where the smoke-alarm checkout lives.
+        var adhdSmokeAlarmBlock: String {
+            """
+            smoke_alarm:
+              - name: "\(slug)"
+                endpoint: "http://localhost:\(healthPort)"
+                interval: 10s
+            """
         }
 
         /// The config at the commit this catalog was transcribed from.
@@ -115,30 +137,35 @@ enum ScenarioCatalog {
                 file: "stdio-mcp-strict.yaml",
                 name: "Strict stdio MCP",
                 useCase: "An npx filesystem server behind a strict stdio MCP handshake.",
+                healthPort: 18188,
                 theme: .transport
             ),
             Scenario(
                 file: "npm-mcp-targets.yaml",
                 name: "npx MCP target matrix",
                 useCase: "Three npx packages — filesystem, memory, github — as stdio targets.",
+                healthPort: 18189,
                 theme: .transport
             ),
             Scenario(
                 file: "npm-sse.yaml",
                 name: "npx SSE with token auth",
                 useCase: "npx packages including GitHub and Brave Search, authenticated from the environment.",
+                healthPort: 18189,
                 theme: .transport
             ),
             Scenario(
                 file: "uvx-sse.yaml",
                 name: "uvx MCP target matrix",
                 useCase: "uvx packages for fetch, git, sqlite and time.",
+                healthPort: 18190,
                 theme: .transport
             ),
             Scenario(
                 file: "sse-remote-mixed.yaml",
                 name: "Mixed remote SSE",
                 useCase: "Remote SSE and strict HTTPS MCP/ACP targets.",
+                healthPort: 18088,
                 theme: .transport,
                 note: "The remote targets are disabled by default; enable them in the YAML to probe."
             ),
@@ -146,6 +173,7 @@ enum ScenarioCatalog {
                 file: "hosted-mcp-acp.yaml",
                 name: "Embedded hosted MCP/ACP",
                 useCase: "A hosted MCP/ACP HTTP+SSE server that monitors itself.",
+                healthPort: 18088,
                 theme: .transport
             )
         ]),
@@ -155,6 +183,7 @@ enum ScenarioCatalog {
                 file: "federation-mesh.yaml",
                 name: "Federation mesh",
                 useCase: "A three-instance mesh that self-elects an introducer; no external targets.",
+                healthPort: 18088,
                 theme: .federation,
                 note: "Run three processes against the same config; each claims a slot on ports 5100–5102."
             ),
@@ -162,24 +191,28 @@ enum ScenarioCatalog {
                 file: "federation-chain.yaml",
                 name: "Federation chain",
                 useCase: "A linear frontend → router → backend → persistence chain.",
+                healthPort: 18088,
                 theme: .federation
             ),
             Scenario(
                 file: "federation-star-hub.yaml",
                 name: "Federation star hub",
                 useCase: "A hub coordinator fanning out to specialist spokes.",
+                healthPort: 18088,
                 theme: .federation
             ),
             Scenario(
                 file: "federation-dependency.yaml",
                 name: "Federation dependency graph",
                 useCase: "A non-linear microservice dependency graph.",
+                healthPort: 18088,
                 theme: .federation
             ),
             Scenario(
                 file: "federation-pool.yaml",
                 name: "Federation worker pool",
                 useCase: "Identical worker pools with quorum semantics.",
+                healthPort: 18088,
                 theme: .federation
             )
         ]),
@@ -189,36 +222,42 @@ enum ScenarioCatalog {
                 file: "a2a-handoff.yaml",
                 name: "A2A handoff",
                 useCase: "Agent-to-agent async handoff across planner, executor, reporter and monitor.",
+                healthPort: 18088,
                 theme: .warroom
             ),
             Scenario(
                 file: "secure-context-handoff.yaml",
                 name: "Secure context handoff",
                 useCase: "Scoped, encrypted context injection with a TTL.",
+                healthPort: 18088,
                 theme: .warroom
             ),
             Scenario(
                 file: "incident-session-ephemeral.yaml",
                 name: "Ephemeral incident session",
                 useCase: "A temporary incident bridge with per-participant scopes.",
+                healthPort: 18088,
                 theme: .warroom
             ),
             Scenario(
                 file: "escalation-chain.yaml",
                 name: "Escalation chain",
                 useCase: "An L1→L4 on-call escalation matrix plus pager.",
+                healthPort: 18088,
                 theme: .warroom
             ),
             Scenario(
                 file: "observer-mode.yaml",
                 name: "Observer mode",
                 useCase: "Read-only observers watching an incident.",
+                healthPort: 18088,
                 theme: .warroom
             ),
             Scenario(
                 file: "disaster-recovery-drill.yaml",
                 name: "Disaster recovery drill",
                 useCase: "A chaos/DR exercise with fast timeouts.",
+                healthPort: 18088,
                 theme: .warroom
             )
         ]),
@@ -228,30 +267,35 @@ enum ScenarioCatalog {
                 file: "oauth-mock-allow.yaml",
                 name: "OAuth mock (allow)",
                 useCase: "An OAuth mock redirect in allow mode.",
+                healthPort: 28088,
                 theme: .auth
             ),
             Scenario(
                 file: "oauth-mock-fail.yaml",
                 name: "OAuth mock (fail)",
                 useCase: "An OAuth mock redirect in fail mode.",
+                healthPort: 29088,
                 theme: .auth
             ),
             Scenario(
                 file: "compliance-audit.yaml",
                 name: "Compliance audit",
                 useCase: "Audit logging, redaction and capability enforcement.",
+                healthPort: 18088,
                 theme: .auth
             ),
             Scenario(
                 file: "multitenancy-isolation.yaml",
                 name: "Multitenancy isolation",
                 useCase: "Tenant A/B/C isolation with distinct scopes.",
+                healthPort: 18088,
                 theme: .auth
             ),
             Scenario(
                 file: "secrets-rotation.yaml",
                 name: "Secrets rotation",
                 useCase: "Short-lived OAuth tokens and rotating API keys.",
+                healthPort: 18088,
                 theme: .auth
             )
         ]),
@@ -261,24 +305,28 @@ enum ScenarioCatalog {
                 file: "deployment-canary.yaml",
                 name: "Deployment canary",
                 useCase: "A blue/green canary rollout with version gates.",
+                healthPort: 18088,
                 theme: .deployment
             ),
             Scenario(
                 file: "deployment-ha.yaml",
                 name: "Deployment HA",
                 useCase: "Two primaries plus a shared store and load balancer.",
+                healthPort: 18088,
                 theme: .deployment
             ),
             Scenario(
                 file: "cost-control.yaml",
                 name: "Cost control",
                 useCase: "Per-request cost awareness and rate-limit handling.",
+                healthPort: 18088,
                 theme: .deployment
             ),
             Scenario(
                 file: "tuner-integration.yaml",
                 name: "Tuner integration",
                 useCase: "mDNS advertisement, audience metrics and a caller hook for Tuner.",
+                healthPort: 18088,
                 theme: .deployment
             )
         ]),
@@ -288,6 +336,7 @@ enum ScenarioCatalog {
                 file: "llmstxt-auto-discovery.yaml",
                 name: "llms.txt auto-discovery",
                 useCase: "Authoritative llms.txt discovery with auto-registration.",
+                healthPort: 18088,
                 theme: .discovery
             )
         ])

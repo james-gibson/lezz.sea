@@ -119,13 +119,26 @@ final class LezzSeaUITests: XCTestCase {
         )
 
         // The action is the point of the panel: copy the documented command.
-        let copy = app.buttons["Copy the command for Strict stdio MCP"]
+        let copy = app.buttons["Copy the lezz command for Strict stdio MCP"]
         XCTAssertTrue(copy.exists, "the copy button is missing")
         copy.click()
         XCTAssertEqual(
             NSPasteboard.general.string(forType: .string),
-            "go run ./cmd/ocd-smoke-alarm serve --config=configs/samples/stdio-mcp-strict.yaml --mode=foreground",
-            "the copied command is not the documented one"
+            "lezz run ocd-smoke-alarm serve --config=configs/samples/stdio-mcp-strict.yaml --mode=foreground",
+            "the copied command is not the lezz one"
+        )
+
+        // The same row can hand over the adhd pairing block.
+        let more = app.descendants(matching: .any)["More actions for Strict stdio MCP"]
+        XCTAssertTrue(more.exists, "the row's action menu is missing")
+        more.click()
+        let adhdItem = app.menuItems["Copy adhd smoke_alarm block"]
+        XCTAssertTrue(adhdItem.waitForExistence(timeout: 3), "the adhd block action is missing")
+        adhdItem.click()
+        XCTAssertEqual(
+            NSPasteboard.general.string(forType: .string),
+            "smoke_alarm:\n  - name: \"stdio-mcp-strict\"\n    endpoint: \"http://localhost:18188\"\n    interval: 10s",
+            "the copied adhd block does not match the sample"
         )
 
         let search = app.textFields["scenarios.search"]

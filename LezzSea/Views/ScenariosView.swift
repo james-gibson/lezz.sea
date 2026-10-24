@@ -50,6 +50,7 @@ struct ScenariosView: View {
                                     scenario: scenario,
                                     copied: copied == scenario.id,
                                     onCopy: { copy(scenario) },
+                                    onCopyADHD: { copyADHD(scenario) },
                                     onOpen: { NSWorkspace.shared.open(scenario.url) }
                                 )
                             }
@@ -79,28 +80,33 @@ struct ScenariosView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Scenarios")
-                .font(.title3.weight(.semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Scenarios")
+                    .font(.title3.weight(.semibold))
 
-            Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Copy the command and run it from a smoke-alarm checkout; the YAML is the source of truth.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
 
-            HStack(spacing: 10) {
-                TextField("Filter scenarios", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Filter scenarios")
-                    .accessibilityIdentifier("scenarios.search")
-
-                Text(query.isEmpty ? "\(total) configs" : "\(shown) of \(total)")
+                Text(countText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .frame(minWidth: 72, alignment: .trailing)
             }
+
+            Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Copy the lezz command and run it from a smoke-alarm checkout; the YAML is the source of truth.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Filter scenarios", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Filter scenarios")
+                .accessibilityIdentifier("scenarios.search")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private var countText: String {
+        query.isEmpty ? "\(total) configs" : "\(shown) of \(total)"
     }
 
     // MARK: - Footer
@@ -111,7 +117,7 @@ struct ScenariosView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            Text("Launching a lab cluster from a scenario is the next step: the identity, key and port belong to the launcher (ADR 0017).")
+            Text("Launching is the lab’s job: lezz run starts the alarm. This build copies that command and the adhd pairing; running several at once needs per-instance loopback addresses.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -129,7 +135,7 @@ struct ScenariosView: View {
         pasteboard.setString(scenario.command, forType: .string)
 
         copied = scenario.id
-        AccessibilityAnnouncer.announce("Command for \(scenario.name) copied.")
+        AccessibilityAnnouncer.announce("lezz command for \(scenario.name) copied.")
 
         Task {
             try? await Task.sleep(for: .seconds(2))
@@ -137,6 +143,14 @@ struct ScenariosView: View {
                 copied = nil
             }
         }
+    }
+
+    private func copyADHD(_ scenario: ScenarioCatalog.Scenario) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(scenario.adhdSmokeAlarmBlock, forType: .string)
+
+        AccessibilityAnnouncer.announce("adhd smoke_alarm block for \(scenario.name) copied.")
     }
 }
 
@@ -174,6 +188,7 @@ private struct ScenarioRow: View {
     let scenario: ScenarioCatalog.Scenario
     let copied: Bool
     let onCopy: () -> Void
+    let onCopyADHD: () -> Void
     let onOpen: () -> Void
 
     var body: some View {
@@ -192,16 +207,20 @@ private struct ScenarioRow: View {
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
-                .help("Copy the serve command")
-                .accessibilityLabel("Copy the command for \(scenario.name)")
+                .help("Copy the lezz command")
+                .accessibilityLabel("Copy the lezz command for \(scenario.name)")
 
-                Button(action: onOpen) {
-                    Image(systemName: "arrow.up.right.square")
+                Menu {
+                    Button("Copy adhd smoke_alarm block") { onCopyADHD() }
+                    Divider()
+                    Button("Open \(scenario.file) on GitHub") { onOpen() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .help("Open \(scenario.file) on GitHub")
-                .accessibilityLabel("Open \(scenario.file) on GitHub in the browser")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("More actions for \(scenario.name)")
+                .accessibilityLabel("More actions for \(scenario.name)")
             }
 
             Text(scenario.file)
@@ -215,7 +234,9 @@ private struct ScenarioRow: View {
                 .foregroundStyle(.secondary)
 
             if let note = scenario.note {
-                Label(note, systemImage: "info.circle")
+                // No leading icon: it indented the note out of the text column
+                // the name, use case and command all share.
+                Text("Note: \(note)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
