@@ -60,8 +60,8 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 200)
-                .help("Switch between Lights and Events (⌘1 / ⌘2)")
+                .frame(width: 230)
+                .help("Switch between panels (⌘1–⌘5)")
                 .accessibilityValue(model.tab.title)
                 .accessibilityIdentifier("toolbar.panel")
             }

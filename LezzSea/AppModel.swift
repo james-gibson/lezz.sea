@@ -44,6 +44,7 @@ final class AppModel {
         case events
         case isotopes
         case boundaries
+        case scenarios
 
         var id: String { rawValue }
 
@@ -53,6 +54,7 @@ final class AppModel {
             case .events: "Events"
             case .isotopes: "Isotopes"
             case .boundaries: "Boundaries"
+            case .scenarios: "Scenarios"
             }
         }
 
@@ -62,12 +64,13 @@ final class AppModel {
             case .events: "waveform.path.ecg"
             case .isotopes: "atom"
             case .boundaries: "checkmark.shield"
+            case .scenarios: "list.bullet.rectangle"
             }
         }
 
-        /// Lights and events describe a cluster. The isotope chart and the
-        /// boundary list are static and must stay reachable with no cluster
-        /// running.
+        /// Lights and events describe a cluster. The isotope chart, the
+        /// boundary list and the scenario catalog are static and must stay
+        /// reachable with no cluster running.
         var needsCluster: Bool {
             self == .lights || self == .events
         }

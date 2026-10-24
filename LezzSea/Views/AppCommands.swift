@@ -42,6 +42,11 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("4")
 
+            Button("Scenarios") {
+                model.tab = .scenarios
+            }
+            .keyboardShortcut("5")
+
             Divider()
 
             Toggle("Pause Events", isOn: pauseBinding)
