@@ -19,10 +19,13 @@
 #   * isotopes  `service.name` is rotated per member. That name is what mDNS
 #               prints, and the key the app and adhd use to find the port the
 #               member actually bound.
-#   * agreement `federation.cluster_id` is shared by every member (the sample's
-#               own value, or one minted here). Peers do not trust each other
-#               by default; the agreement is what mirrors them into each
-#               other's isotope list at the peer-certified rung.
+#   * agreement `federation.cluster_id` is kept exactly as the sample declares
+#               it — never invented, never filled. Peers do not trust each
+#               other by default; a sample that declares an agreement opts its
+#               members into being mirrored into each other's isotope lists at
+#               the peer-certified rung. Mesh declares one; pool, chain, star
+#               and dependency deliberately do not, and an empty value means
+#               self-trust is off.
 #
 # Nothing is written to /tmp directly. Work happens in a mktemp directory under
 # the per-user $TMPDIR, so a lab run is not world-readable and does not leave a
@@ -149,7 +152,13 @@ PY
 }
 
 if [ -n "$STOP_SLUG" ]; then
-  stop_cluster "$STOP_SLUG" "$APP_SUPPORT/$STOP_SLUG/cluster.json"
+  pointer="$APP_SUPPORT/$STOP_SLUG/cluster.json"
+  if [ ! -f "$pointer" ]; then
+    # A --no-register run leaves the contract in its work directory only.
+    pointer=$(ls -td "${TMPDIR:-/tmp}"/lezzsea-lab.*/"$STOP_SLUG"/cluster.json 2>/dev/null | head -1 || true)
+  fi
+  [ -n "$pointer" ] || fail "no cluster.json for $STOP_SLUG (registered or in a work directory)"
+  stop_cluster "$STOP_SLUG" "$pointer"
   exit 0
 fi
 
@@ -157,8 +166,8 @@ fi
 #
 # Kept in step with LezzSea/Models/ScenarioConfig.swift. The rules are the
 # point, so they are stated once here and pinned by the Swift unit tests: state
-# moves, isotope rotates, discovery turns on, agreement is supplied; ports stay
-# where the sample put them.
+# moves, isotope rotates, discovery turns on; ports and the sample's agreement
+# stay exactly where the sample put them.
 
 derive() {
   python3 - "$1" "$2" "$3" "$4" "$5" <<'PY'
@@ -216,7 +225,10 @@ if base_name is None:
     sys.exit("the sample does not declare service.name")
 
 isotope = f"{base_name}-{slug}-{index}"
-agreement = declared_cluster or f"lezzsea-{slug}"
+# The sample's own statement about self-trust. Never invented and never
+# filled: mesh declares one; pool/chain/star/dependency deliberately do not,
+# and an empty value means "no self-trust" (federation-mesh.yaml says so).
+agreement = declared_cluster
 
 out = []
 section = None
@@ -250,10 +262,6 @@ for line in lines:
             tuner_defaults()
         section = m.group(1)
         out.append(line)
-        if section == "federation" and not has_cluster_line:
-            out.append("  # Added by lab-cluster.sh: the agreement that makes peers trust each other.")
-            out.append(f'  cluster_id: "{agreement}"')
-            inserted_cluster = True
         continue
 
     key = key_of(line)
@@ -278,16 +286,10 @@ for line in lines:
         tuner_type = True
         out.append(replace_scalar(line, '"_smoke-alarm._tcp"'))
         continue
-    if section == "federation" and key == "cluster_id":
-        if scalar(line) is None:
-            out.append(replace_scalar(line, f'"{agreement}"'))
-            continue
     out.append(line)
 
 if section == "tuner":
     tuner_defaults()
-if section == "federation" and not has_cluster_line and not inserted_cluster:
-    out.append(f'  cluster_id: "{agreement}"')
 
 for key in ("state_dir", "lock_file", "baseline_file"):
     if key not in seen_runtime:
@@ -297,7 +299,9 @@ if not has_tuner:
     out += [
         "",
         "# Added by lab-cluster.sh: every member advertises its own isotope name",
-        "# so mDNS can tell the members of a lab cluster apart.",
+        "# so mDNS can tell the members of a lab cluster apart. The federation",
+        "# agreement is *not* added here: a sample that omits cluster_id has",
+        "# chosen not to let its members trust each other by construction.",
         "tuner:",
         "  enabled: true",
         "  advertise: true",
@@ -309,7 +313,7 @@ with open(out_path, "w", encoding="utf-8") as handle:
     handle.write("\n".join(out) + "\n")
 
 root = str(base_port) if has_federation and base_port is not None else ""
-cluster = agreement if has_federation else ""
+cluster = (agreement or "") if has_federation else ""
 print("\t".join([isotope, str(health), root, cluster]))
 PY
 }
@@ -384,7 +388,7 @@ verify() {
   python3 - "$@" <<'PY'
 import json, sys, time, urllib.request
 
-root_port, count, *pairs = sys.argv[1:]
+root_port, count, agreement, *pairs = sys.argv[1:]
 count = int(count)
 expected = set()
 ports = {}
@@ -406,19 +410,29 @@ def check():
         failures.append(f"root sees {len(records)} member(s), expected {count}")
     if names != expected:
         failures.append(f"root sees {sorted(names)}, expected {sorted(expected)}")
-    agreements = {record.get("cluster_id") for record in records}
-    if len(agreements) != 1 or None in agreements:
-        failures.append(f"members do not share one agreement: {sorted(map(str, agreements))}")
+    agreements = {record.get("cluster_id") or "" for record in records}
+    if agreement:
+        if agreements != {agreement}:
+            failures.append(f"members do not share the declared agreement {agreement!r}: {sorted(agreements)}")
+    elif any(agreements):
+        failures.append(f"a member announced an agreement the sample did not declare: {sorted(agreements)}")
     if membership["self"].get("role") != "introducer":
         failures.append("the root is not the introducer")
 
     for isotope, port in sorted(ports.items()):
         listed = get(f"http://127.0.0.1:{port}/isotope/list")
         rungs = {record.get("trust_rung") for record in listed}
-        if len(listed) != count:
-            failures.append(f"{isotope}: {len(listed)} isotope(s), expected {count}")
-        if rungs != {4}:
-            failures.append(f"{isotope}: rungs {sorted(rungs)}, expected the peer-certified rung 4")
+        if agreement:
+            # Members of an agreed cluster mirror each other at the
+            # peer-certified rung, so each list is the whole cluster.
+            if len(listed) != count:
+                failures.append(f"{isotope}: {len(listed)} isotope(s), expected {count}")
+            if rungs != {4}:
+                failures.append(f"{isotope}: rungs {sorted(rungs)}, expected the peer-certified rung 4")
+        elif 4 in rungs:
+            # No agreement means nobody is trusted by construction. A rung-4
+            # record here is a self-grant or a cross-cluster mirror.
+            failures.append(f"{isotope}: rung 4 present without a declared agreement")
     return failures, agreements
 
 # Membership is announced on a timer, so a freshly started cluster is briefly
@@ -441,9 +455,13 @@ if failures:
         print(f"  - {failure}")
     sys.exit(1)
 
-print(f"root :{root_port} introducer, {count}/{count} members, one agreement")
-print("agreement: " + agreements.pop())
-print("isotopes: every member mirrors every other at rung 4")
+print(f"root :{root_port} introducer, {count}/{count} members")
+if agreement:
+    print("agreement: " + agreement)
+    print("isotopes: every member mirrors every other at rung 4")
+else:
+    print("agreement: none (the sample did not opt into self-trust)")
+    print("isotopes: no rung-4 records, as declared")
 PY
 }
 
@@ -588,7 +606,7 @@ if [ "$REGISTER" -eq 1 ]; then
 fi
 
 if [ -n "$ROOT_PORT" ]; then
-  verify "$ROOT_PORT" "$COUNT" \
+  verify "$ROOT_PORT" "$COUNT" "$CLUSTER_ID" \
     $(for index in $(seq 1 "$COUNT"); do
         printf '%s %s ' "${ISOTOPES[$((index - 1))]}" "${HEALTH_PORTS[$((index - 1))]}"
       done)

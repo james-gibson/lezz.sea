@@ -237,9 +237,9 @@ access to that file; subsequent launches reuse the stored bookmark.
   bound port, and the federation claims the first slot in its range, so the
   first process is the introducer. The launcher therefore leaves ports alone,
   rotates `service.name` per member (the mDNS instance name), turns
-  `tuner.advertise` on, and supplies the `cluster_id` agreement that makes
-  peers trust each other by construction. The bound port is found by scanning
-  loopback upward and accepting only a port whose `/status` names the isotope —
+  `tuner.advertise` on, and keeps a `cluster_id` agreement only when the sample
+  declares one — it never invents self-trust for a sample that omitted it.
+  The bound port is found by scanning loopback upward and accepting only a port whose `/status` names the isotope —
   mDNS is used when it answers, but a `127.0.0.1` port must not depend on the
   local-network permission. The derived state is absolute and per-member. See
   `docs/scenarios.md`.

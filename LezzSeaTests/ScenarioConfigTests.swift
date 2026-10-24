@@ -124,12 +124,14 @@ struct ScenarioConfigTests {
         #expect(!derived.text.contains("_other._tcp"))
     }
 
-    @Test func theAgreementIsSuppliedWhenTheSampleHasNone() throws {
+    @Test func aSampleThatDeclaresNoAgreementGetsNone() throws {
         let derived = try derive()
 
-        #expect(derived.clusterID == "lezzsea-test")
-        #expect(derived.text.contains("cluster_id: \"lezzsea-test\""))
-        #expect(derived.text.components(separatedBy: "cluster_id:").count == 2)
+        // The launcher does not invent self-trust: pool, chain, star and
+        // dependency deliberately omit cluster_id, and a single member that
+        // announced one would list itself at the peer-certified rung.
+        #expect(derived.clusterID == nil)
+        #expect(!derived.text.contains("cluster_id:"))
     }
 
     @Test func aDeclaredAgreementIsKept() throws {
@@ -141,17 +143,19 @@ struct ScenarioConfigTests {
 
         #expect(derived.clusterID == "mesh-sample")
         #expect(derived.text.contains("cluster_id: \"mesh-sample\""))
-        #expect(!derived.text.contains("lezzsea-test"))
+        #expect(derived.text.components(separatedBy: "cluster_id:").count == 2)
     }
 
-    @Test func anEmptyAgreementIsFilledRatherThanDuplicated() throws {
+    @Test func anEmptyAgreementStaysEmpty() throws {
         let empty = sample.replacingOccurrences(
             of: "  base_port: 5100",
             with: "  cluster_id: \"\"\n  base_port: 5100"
         )
         let derived = try derive(empty)
 
-        #expect(derived.clusterID == "lezzsea-test")
+        // federation-mesh.yaml: "Leave empty to disable self-trust."
+        #expect(derived.clusterID == nil)
+        #expect(derived.text.contains("cluster_id: \"\""))
         #expect(derived.text.components(separatedBy: "cluster_id:").count == 2)
     }
 

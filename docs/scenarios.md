@@ -106,7 +106,7 @@ changes four things instead:
 | --- | --- |
 | `service.name` becomes `<name>-<slug>-<n>` | it is the mDNS instance name, so three members need three names |
 | `tuner.advertise: true` + `_smoke-alarm._tcp` | the advertisement carries the bound port for adhd, Tuner and any other consumer |
-| `federation.cluster_id` supplied or kept | peers do not trust each other by default; the shared identity is the agreement that mirrors them into each other's isotope lists at the peer-certified rung |
+| `federation.cluster_id` kept only when the sample declares one | peers do not trust each other by default; a declared agreement is what mirrors members into each other's isotope lists at the peer-certified rung. The launcher never invents one and never fills an empty one, because pool, chain, star and dependency deliberately omit it |
 | `runtime.*` paths become absolute and per-member | two members must not share a lock file or a baseline |
 
 Nothing else is edited, and the sample is never modified: each launch writes
@@ -144,10 +144,18 @@ cluster exactly like one it started. The verification script uses this: it
 launches a cluster from outside the app, registers the same file, and the
 Scenarios panel shows it.
 
-The app shows a cluster as **running** only when the root names every member's
-isotope under this cluster's agreement. Some members but not all is **partial**;
-a root whose agreement differs is **unreachable** — the port belongs to
-somebody else's cluster.
+The app shows a cluster as **running** only when the root names every member.
+When the cluster carries a declared agreement, the members must also share it;
+some members but not all is **partial**, and a root whose agreement differs is
+**unreachable** — the port belongs to somebody else's stack.
+
+That distinction is load-bearing. `cluster_id` is the sample's statement that
+its members may trust each other *by construction*: mesh declares one, while
+pool, chain, star and dependency do not. A sample that omits it still forms a
+federation (the first process is the introducer, the rest follow) but nobody is
+mirrored at the peer-certified rung, so a pool of identical workers does not
+trust itself merely by sharing a pool. An empty value means the same thing
+(`federation-mesh.yaml`: "Leave empty to disable self-trust").
 
 ### Multi-process clusters are launched by the script, for now
 

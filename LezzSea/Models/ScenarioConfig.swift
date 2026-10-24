@@ -16,9 +16,14 @@
 //
 //  So the rewrite leaves every port alone and rotates the isotope instead: the
 //  service name is what mDNS prints, and it has to be unique per instance or
-//  three instances share one advertisement. The federation cluster id is the
-//  agreement peers need to trust each other by construction; the launcher
-//  supplies one when the sample does not.
+//  three instances share one advertisement.
+//
+//  The launcher does not invent a federation agreement. `cluster_id` is a
+//  sample's statement that its members may trust each other by construction
+//  (mesh declares one; pool, chain, star and dependency deliberately do not,
+//  because a pool of identical workers must not trust itself). The launcher
+//  keeps a declared id and never fills an empty one — the mesh sample's own
+//  comment says an empty value disables self-trust.
 //
 //  What it does change is state: every instance writes its own absolute
 //  runtime paths, so two instances never share a lock file or a baseline.
@@ -39,8 +44,9 @@ enum ScenarioConfig {
         /// The federation slot range's first port — the root a follower
         /// announces at, and the leader's slot when this instance is first.
         let rootPort: Int?
-        /// The cluster identity the instance announces. Same value for every
-        /// member of one launch, which is the isotope agreement.
+        /// The cluster identity the instance announces, when the sample
+        /// declares one. Same value for every member of one launch; nil means
+        /// the sample does not opt into self-trust.
         let clusterID: String?
     }
 
@@ -72,12 +78,6 @@ enum ScenarioConfig {
         "\(base)-\(slug)-\(index)"
     }
 
-    /// The cluster identity every member of one launch announces. `slug` keeps
-    /// two scenarios on one machine from sharing an agreement by accident.
-    static func clusterID(slug: String) -> String {
-        "lezzsea-\(slug)"
-    }
-
     // MARK: - Derivation
 
     static func derive(
@@ -96,7 +96,6 @@ enum ScenarioConfig {
         var declaredClusterID: String?
         var hasTuner = false
         var hasFederation = false
-        var hasClusterLine = false
 
         for line in lines {
             if let name = topLevelName(line) {
@@ -125,7 +124,8 @@ enum ScenarioConfig {
                     rootPort = value
                 }
                 if keyName(line) == "cluster_id" {
-                    hasClusterLine = true
+                    // An empty value is a deliberate "no self-trust"; an absent
+                    // key means the sample never opted in. Neither is filled.
                     declaredClusterID = stringValue(line)
                 }
             default:
@@ -137,7 +137,6 @@ enum ScenarioConfig {
         guard let baseServiceName else { throw DeriveError.noServiceName }
 
         let isotope = isotopeName(base: baseServiceName, slug: slug, index: index)
-        let agreement = declaredClusterID ?? clusterID(slug: slug)
 
         // Second pass: rewrite state, rotate the isotope, turn discovery on and
         // make sure every member announces the same agreement.
@@ -147,8 +146,6 @@ enum ScenarioConfig {
         var seenRuntime = Set<String>()
         var tunerAdvertiseWritten = false
         var tunerTypeWritten = false
-        var clusterLineWritten = false
-        var insertedClusterLine = false
 
         func flushTunerDefaults() {
             if !tunerAdvertiseWritten {
@@ -169,12 +166,6 @@ enum ScenarioConfig {
                 }
                 section = name
                 output.append(line)
-
-                if name == "federation", !hasClusterLine {
-                    output.append("  # Added by lezz.sea: the agreement that makes peers trust each other.")
-                    output.append("  cluster_id: \"\(agreement)\"")
-                    insertedClusterLine = true
-                }
                 continue
             }
 
@@ -202,17 +193,6 @@ enum ScenarioConfig {
                     output.append(replacingStringValue(line, with: discoveryType))
                     continue
                 }
-            case "federation":
-                if keyName(line) == "cluster_id" {
-                    clusterLineWritten = true
-                    // An empty key is the sample's way of saying "no agreement
-                    // yet"; the launcher supplies it rather than adding a
-                    // duplicate key beside it.
-                    if stringValue(line) == nil {
-                        output.append(replacingStringValue(line, with: agreement))
-                        continue
-                    }
-                }
             default:
                 break
             }
@@ -223,9 +203,6 @@ enum ScenarioConfig {
         // The last section never closes, so flush its defaults here.
         if section == "tuner" {
             flushTunerDefaults()
-        }
-        if section == "federation", !clusterLineWritten, !insertedClusterLine {
-            output.append("  cluster_id: \"\(agreement)\"")
         }
 
         for key in ["state_dir", "lock_file", "baseline_file"] where !seenRuntime.contains(key) {
@@ -249,7 +226,7 @@ enum ScenarioConfig {
             isotope: isotope,
             preferredHealthPort: health,
             rootPort: hasFederation ? rootPort : nil,
-            clusterID: hasFederation ? agreement : nil
+            clusterID: hasFederation ? declaredClusterID : nil
         )
     }
 

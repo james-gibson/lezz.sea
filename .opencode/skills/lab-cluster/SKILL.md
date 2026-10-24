@@ -102,8 +102,9 @@ scripts/lab-cluster.sh --stop federation-mesh
 ```
 
 That stops every member by its pid file, stops the paired adhd if the contract
-records one, and removes the registered `cluster.json`. The work directory is
-kept for logs; remove it when the run is understood.
+records one, and removes the registered `cluster.json`. A `--no-register` run has
+no registered copy, so `--stop` falls back to the newest work directory for that
+slug. The work directory is kept for logs; remove it when the run is understood.
 
 ## Rules
 
@@ -111,9 +112,9 @@ kept for logs; remove it when the run is understood.
   directory are keyed by slug.
 - Do not run two `lab-cluster.sh` invocations for the same sample in parallel;
   they share a slug and would fight over the contract file.
-- If a run was interrupted before registration, stop it from the work directory's
-  `cluster.json` (`--stop <slug>` reads the registered copy only) or by the pid
-  files in `member-<n>/`.
+- If a run was interrupted before registration, `--stop <slug>` still finds the
+  newest work directory's `cluster.json`; otherwise stop by the pid files in
+  `member-<n>/`.
 - `-72007`/`NoAuth` from `dns-sd` means the calling process lacks local network
   permission. The script falls back to a name-checked loopback scan; the app
   does the same, so a cluster is still usable, but the mDNS advertisement itself
