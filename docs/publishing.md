@@ -9,8 +9,10 @@ published. One command does a publish:
 scripts/publish-dev.sh
 ```
 
-That builds, signs, verifies, packages and uploads. Stable download URLs, which
-are the same after every publish:
+That builds the **Lab** variant (no App Sandbox, launcher compiled in), signs
+it, verifies, packages and uploads. The App Store build stays the standard
+sandboxed Release configuration. Stable download URLs, which are the same after
+every publish:
 
 ```
 https://github.com/james-gibson/lezz.sea/releases/download/dev/lezz.sea.app.zip

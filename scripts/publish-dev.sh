@@ -134,6 +134,8 @@ if ! xcodebuild archive \
       -derivedDataPath "$WORK/DerivedData" \
       MARKETING_VERSION="$VERSION" \
       CURRENT_PROJECT_VERSION="$BUILD" \
+      CODE_SIGN_ENTITLEMENTS="LezzSea/LezzSea-Lab.entitlements" \
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS="LAB_LAUNCHER" \
       >"$WORK/archive.log" 2>&1; then
   tail -40 "$WORK/archive.log" >&2
   die "xcodebuild archive failed (full log: $WORK/archive.log)"

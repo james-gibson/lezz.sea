@@ -137,7 +137,7 @@ final class LezzSeaUITests: XCTestCase {
         adhdItem.click()
         XCTAssertEqual(
             NSPasteboard.general.string(forType: .string),
-            "smoke_alarm:\n  - name: \"stdio-mcp-strict\"\n    endpoint: \"http://localhost:18188\"\n    interval: 10s",
+            "smoke_alarm:\n  - name: \"stdio-mcp-strict\"\n    endpoint: \"http://127.0.0.1:18188\"\n    interval: 10s",
             "the copied adhd block does not match the sample"
         )
 

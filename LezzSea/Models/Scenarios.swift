@@ -98,11 +98,14 @@ enum ScenarioCatalog {
         /// fragment: paste it under the key in adhd's config. `features` and
         /// `gherkin_files` are a separate decision because they depend on
         /// where the smoke-alarm checkout lives.
-        var adhdSmokeAlarmBlock: String {
+        ///
+        /// Pass the running instance's port when one exists: the launcher
+        /// remaps the sample's fixed health port.
+        func adhdSmokeAlarmBlock(healthPort: Int? = nil) -> String {
             """
             smoke_alarm:
               - name: "\(slug)"
-                endpoint: "http://localhost:\(healthPort)"
+                endpoint: "http://127.0.0.1:\(healthPort ?? self.healthPort)"
                 interval: 10s
             """
         }

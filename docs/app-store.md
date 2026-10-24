@@ -56,3 +56,8 @@ scenario catalog are static and need no service at all, so they can be
 exercised on a clean Mac. The traffic-log reader is optional; the app opens an
 `NSOpenPanel` and persists a security-scoped bookmark for the file the reviewer
 chooses. No login, purchase, or account is required.
+
+The build submitted here is the sandboxed configuration. The Scenarios panel in
+that build copies the `lezz` command and the adhd pairing; it has no launch
+controls. The Lab launcher is a separate, non-App-Store build that runs outside
+the App Sandbox.

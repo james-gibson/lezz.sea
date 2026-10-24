@@ -46,9 +46,10 @@ struct ScenarioCatalogTests {
     @Test func everyScenarioHasAHealthPortAndAnAdhdBlock() {
         for scenario in ScenarioCatalog.all {
             #expect(scenario.healthPort > 0)
-            #expect(scenario.adhdSmokeAlarmBlock.contains("endpoint: \"http://localhost:\(scenario.healthPort)\""))
+            #expect(scenario.adhdSmokeAlarmBlock().contains("endpoint: \"http://127.0.0.1:\(scenario.healthPort)\""))
+            #expect(scenario.adhdSmokeAlarmBlock(healthPort: 19_188).contains("127.0.0.1:19188"))
 
-            let lines = scenario.adhdSmokeAlarmBlock.split(separator: "\n")
+            let lines = scenario.adhdSmokeAlarmBlock().split(separator: "\n")
             #expect(lines.first == "smoke_alarm:")
             #expect(lines.contains { $0.contains("name: \"\(scenario.slug)\"") })
             #expect(lines.contains { $0.contains("interval: 10s") })

@@ -35,9 +35,11 @@ that cluster's lab can run.
   See `smoke-alarm/docs/adr/0020-the-boundary-is-the-interface.md`.
 - **Scenarios.** smoke-alarm's ready-to-run config catalog, grouped by theme —
   transport, federation, warroom, auth, deployment, discovery — with the
-  `lezz run` command for each config, an adhd `smoke_alarm` block to pair it
-  with a cluster, and a link to the YAML. Static, and needs no cluster.
-  Launching itself is the launcher's job; see `docs/scenarios.md`.
+  `lezz run` command, an adhd `smoke_alarm` block, and a link to the YAML. In
+  the Lab build a row launches the scenario: it derives a config with absolute
+  state and remapped ports, runs the alarm headless, shows its health port, and
+  stops it. The sandboxed build copies the command and the block instead. See
+  `docs/scenarios.md`.
 - **Discovery.** Checks the lezz cluster registry (`:19100/cluster`), probes the
   default adhd endpoint (`127.0.0.1:9090/mcp`), and watches Bonjour for
   `_adhd-isotope._tcp`.
@@ -62,6 +64,21 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
   -configuration Debug -destination 'platform=macOS' build
 ```
 
+The default build is sandboxed, so it cannot start external processes. The
+**Lab** build is the same sources without the App Sandbox, with the launcher
+compiled in:
+
+```sh
+xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
+  -configuration Release -destination 'platform=macOS' \
+  CODE_SIGN_ENTITLEMENTS=LezzSea/LezzSea-Lab.entitlements \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS=LAB_LAUNCHER \
+  ENABLE_APP_SANDBOX=NO ENABLE_USER_SELECTED_FILES= build
+```
+
+It runs `lezz` and the alarm that `lezz` execs. It is a developer build and is
+not submitted to the App Store.
+
 Run the unit and UI tests with:
 
 ```sh
@@ -73,7 +90,8 @@ The UI tests assert the two properties the shipped build broke: the window
 never shrinks below its floor, and the panel switch moves between panes. They
 also check that the lights table's rightmost column stays inside the window,
 that the isotope chart and boundary list render without a cluster, and that the
-scenario filter narrows the catalog and both clipboard payloads are exact.
+scenario filter narrows the catalog and both clipboard payloads are exact. The
+unit tests also pin the derived config's port remap and absolute state paths.
 
 ## Accessibility
 
@@ -94,6 +112,9 @@ accessible in a screenshot.
   holds it or the fact that it is a conformance gap. Each scenario row names
   its config and its command, the Copy button says which scenario it copies,
   and the row's action menu names the scenario it belongs to.
+- **Launch state is spoken.** In the Lab build the running/unreachable badge
+  announces its port, and the play and stop buttons name the scenario they act
+  on.
 - **Chart and boundary layouts flex.** The isotope chart scrolls inside its
   pane rather than demanding a fixed 720 points, and boundary rows move the
   evidence chip below the invariant when the pane is narrow.
@@ -122,14 +143,19 @@ accessible in a screenshot.
   states that nothing is tracked or collected.
 - `ITSAppUsesNonExemptEncryption` is `false`: the app implements no
   cryptography, it only speaks HTTP/JSON to a cluster the user selected.
+- **The Lab build is not the App Store build.** It has no App Sandbox because
+  the launcher runs `lezz`; the sandboxed build compiles the launch UI out and
+  only offers the copy actions. Submit the standard build.
 
 See [docs/app-store.md](docs/app-store.md) for the review checklist and the
 items that can only be completed in App Store Connect.
 
 ## Publish a dev build
 
-Builds are signed on the signing machine and published to the `dev` prerelease;
-CI has no certificate and only verifies what was published.
+`publish-dev.sh` archives the **Lab** variant (no App Sandbox, launcher
+compiled in) and exports it with Developer ID. Builds are signed on the signing
+machine and published to the `dev` prerelease; CI has no certificate and only
+verifies what was published.
 
 ```sh
 scripts/publish-dev.sh              # add --notarize once credentials are stored
@@ -184,14 +210,16 @@ access to that file; subsequent launches reuse the stored bookmark.
   versus stochastic effect — with work as the source and accumulated 42i
   distance as the dose. No ionizing radiation, no radiological quantity
   (Bq, Gy, Sv), no safety function.
-- **The scenario catalog is a suggestion surface, not a launcher.** It is
-  transcribed from `smoke-alarm/configs/samples` at a recorded commit, because
-  the YAML is the source of truth. The app copies the lab's `lezz run` command,
-  pairs adhd with the sample's health port, and links to the file; it does not
-  start a process. The samples' relative state paths and fixed ports need a
-  derived config first, and the sandbox cannot spawn the lab's binary. The
-  launcher path is a loopback address per instance (`127.0.0.N`) and a
-  LaunchServices hand-off to Lezz.app, tracked in #6.
+- **Launching is a Lab-build feature, not a sandbox trick.** macOS refuses to
+  start an external process from the sandbox, and an SMAppService agent
+  registered by a sandboxed app must itself be sandboxed — which cannot exec
+  `lezz`. The Lab build runs it directly; the App Store build copies commands.
+- **Ports, not loopback aliases.** macOS will not bind `127.0.0.N` without a
+  root-added alias. The derived config moves the health, auth, hosted and
+  federation ports by a per-instance offset and rewrites self-references; two
+  scenarios were verified running together on `127.0.0.1`.
+- **The sample is never edited.** Each launch writes a derived config and an
+  absolute state directory under `Application Support/LezzSea/Instances`.
 - **The panel is not a `TabView`.** On macOS a `TabView` with `.tabItem` draws
   its own strip over the content, which overlapped the summary bar. The panel is
   a toolbar picker bound to `AppModel.tab` and the detail pane switches in
@@ -212,10 +240,13 @@ LezzSea/
   Models/NuclideChart.swift threat classes, isotopes, decay channels
   Models/Boundaries.swift   invariants, the test that holds each, its failure
   Models/Scenarios.swift    smoke-alarm's sample configs, grouped by theme
+  Models/ScenarioConfig.swift  per-instance config derivation (state, ports)
+  Support/ScenarioLab.swift  checkout bookmark, slot allocation, launch/stop
   Services/                 JSON-RPC client, file tail, Bonjour, URL normalising
   Support/                  status naming, layout metrics, VoiceOver announcements
   Views/                    sidebar, dashboard, lights, events, isotopes, boundaries, scenarios, settings
   LezzSea.entitlements      App Sandbox, network client, user-selected read
+  LezzSea-Lab.entitlements  no sandbox; the Lab launcher only
   PrivacyInfo.xcprivacy     required-reason API declarations
 ```
 
