@@ -2,16 +2,27 @@
 //  ScenarioLab.swift
 //  LezzSea
 //
-//  Runs a scenario through the signed lab helper.
+//  Runs a scenario through the signed lab helper, and reads the clusters that
+//  are already running.
 //
 //  The sandboxed build can only copy commands: macOS refuses to launch an
 //  external process from it, and an SMAppService agent would have to be
 //  sandboxed too, which cannot exec `lezz`. The launcher is therefore compiled
 //  into the unsandboxed Lab configuration, where it runs `lezz` directly.
 //
-//  Each launch gets its own derived config (absolute state, remapped ports) and
-//  its own instance directory. The alarm writes its pid file there, so the same
-//  job channel stops it with `ops stop`.
+//  Ports are not moved to tell instances apart. The alarm already negotiates
+//  its own: the health server scans upward when its port is taken, and the
+//  federation claims the first free slot in its range. The launcher therefore
+//  rotates the isotope name, turns mDNS on, and finds the bound port by
+//  scanning loopback upward and accepting a port only when `/status` names that
+//  isotope. The advertisement is the designed channel and is used when it
+//  answers, but a 127.0.0.1 port must not depend on the local-network
+//  permission mDNS needs. The federation root is where peers announce each
+//  other, so it is also where the app asks whether a cluster is whole.
+//
+//  `cluster.json` is the contract. A test script can write one and the app
+//  treats that cluster exactly like one it started, which is how the launcher
+//  was verified before it was allowed to launch multi-process scenarios.
 //
 
 import AppKit
@@ -22,61 +33,59 @@ import Observation
 @Observable
 final class ScenarioLab {
 
-    struct Instance: Codable, Identifiable, Hashable, Sendable {
-        let scenarioID: String
-        let name: String
-        let slug: String
-        let offset: Int
-        let healthPort: Int
-        let configPath: String
-        let pidPath: String
-        let startedAt: Date
-
-        var id: String { "\(slug)-\(offset)" }
-
-        var directory: URL {
-            URL(fileURLWithPath: configPath).deletingLastPathComponent()
-        }
-
-        var healthURL: URL {
-            URL(string: "http://127.0.0.1:\(healthPort)/status")!
-        }
-
-        var adhdEndpoint: String {
-            "http://127.0.0.1:\(healthPort)"
-        }
-
-        var launchCommand: String {
-            "lezz run ocd-smoke-alarm serve --config=\(configPath) --mode=headless"
-        }
-    }
-
     enum RunState: String, Sendable {
         case starting
         case running
+        /// Some members of the cluster answered, but not all of them.
+        case partial
         case unreachable
 
         var label: String {
             switch self {
             case .starting: "starting"
             case .running: "running"
+            case .partial: "partial"
             case .unreachable: "unreachable"
             }
         }
     }
 
     private(set) var checkout: URL?
-    private(set) var instances: [Instance] = []
+    private(set) var clusters: [LabCluster] = []
     private(set) var states: [String: RunState] = [:]
+    /// Members seen per cluster, for the `3/3` in the row badge.
+    private(set) var membersUp: [String: Int] = [:]
+    /// The port each member actually bound, keyed by isotope name. Filled from
+    /// mDNS, or from a `/status` answer that names the isotope.
+    private(set) var resolvedPorts: [String: Int] = [:]
     private(set) var busy: Set<String> = []
     var lastError: String?
 
     private let bookmarkKey = "lab.smokeAlarmCheckout"
     private let fileManager = FileManager.default
+    private let watcher = ServicePortWatcher(serviceType: ScenarioConfig.discoveryType)
+    @ObservationIgnored private var advertisedPorts: [String: Int] = [:]
+    @ObservationIgnored private var watching = false
 
     init() {
         restoreCheckout()
-        loadInstances()
+        loadClusters()
+        watcher.onChange = { [weak self] ports in
+            Task { @MainActor in
+                self?.advertisedPorts = ports
+                self?.applyAdvertisedPorts()
+            }
+        }
+        startWatchingIfNeeded()
+    }
+
+    /// Browsing triggers the local-network prompt, and the sandboxed build can
+    /// never have a launcher cluster to resolve. Only browse once a cluster
+    /// exists to browse for.
+    private func startWatchingIfNeeded() {
+        guard !watching, !clusters.isEmpty else { return }
+        watching = true
+        watcher.start()
     }
 
     // MARK: - Checkout
@@ -145,18 +154,45 @@ final class ScenarioLab {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
-    // MARK: - Launch
+    // MARK: - Queries
 
-    func instance(for scenario: ScenarioCatalog.Scenario) -> Instance? {
-        instances.first { $0.scenarioID == scenario.file }
+    func cluster(for scenario: ScenarioCatalog.Scenario) -> LabCluster? {
+        clusters.first { $0.scenarioID == scenario.file }
+            ?? clusters.first { $0.slug == scenario.slug }
     }
 
     func state(for scenario: ScenarioCatalog.Scenario) -> RunState? {
-        instance(for: scenario).flatMap { states[$0.id] }
+        cluster(for: scenario).flatMap { states[$0.id] }
     }
+
+    func membersUp(for scenario: ScenarioCatalog.Scenario) -> Int? {
+        cluster(for: scenario).flatMap { membersUp[$0.id] }
+    }
+
+    /// The ports to hand adhd, in member order. A member whose port has not
+    /// been discovered yet is skipped rather than guessed: pairing adhd with a
+    /// port that answers for somebody else is worse than pairing it later.
+    func healthPorts(for scenario: ScenarioCatalog.Scenario) -> [Int] {
+        guard let cluster = cluster(for: scenario) else { return [] }
+        return cluster.members.compactMap { resolvedPorts[$0.isotope] }
+    }
+
+    func port(for member: LabMember) -> Int? {
+        resolvedPorts[member.isotope]
+    }
+
+    // MARK: - Launch
 
     func launch(_ scenario: ScenarioCatalog.Scenario) async {
         guard !busy.contains(scenario.id) else { return }
+
+        guard scenario.processes == 1 else {
+            lastError = "\(scenario.name) is a \(scenario.processes)-process cluster. "
+                + "Launch it with scripts/lab-cluster.sh until the launcher's discovery is verified."
+            return
+        }
+
+        if cluster(for: scenario) != nil { return }
 
         if checkout == nil {
             chooseCheckout()
@@ -175,24 +211,26 @@ final class ScenarioLab {
         busy.insert(scenario.id)
         defer { busy.remove(scenario.id) }
 
-        var created: Instance?
+        var created: LabCluster?
 
         do {
             let source = try String(contentsOf: sample, encoding: .utf8)
-            let prepared = try prepare(source: source, scenario: scenario)
-            try writeMetadata(prepared.instance)
+            let cluster = try prepare(source: source, scenario: scenario)
+            try writeMetadata(cluster)
 
-            created = prepared.instance
-            instances.append(prepared.instance)
-            states[prepared.instance.id] = .starting
+            created = cluster
+            clusters.append(cluster)
+            states[cluster.id] = .starting
 
-            _ = try runLezz([
-                "run", "ocd-smoke-alarm", "serve",
-                "--config=\(prepared.instance.configPath)",
-                "--mode=headless",
-            ], wait: false)
+            for member in cluster.members {
+                _ = try runLezz([
+                    "run", "ocd-smoke-alarm", "serve",
+                    "--config=\(member.configPath)",
+                    "--mode=headless",
+                ], log: member.logPath, wait: false)
+            }
 
-            await waitForHealth(prepared.instance)
+            await waitForHealth(cluster)
         } catch {
             if let created, states[created.id] == .starting {
                 removeMetadata(created)
@@ -201,168 +239,343 @@ final class ScenarioLab {
         }
     }
 
-    private struct Prepared {
-        let instance: Instance
-    }
-
     private func prepare(
         source: String,
         scenario: ScenarioCatalog.Scenario
-    ) throws -> Prepared {
-        // The app is not entitled to bind a probe socket (network.server), so
-        // it cannot ask the kernel which ports are free. Instead each live
-        // instance owns a slot; a port taken by something else shows up as an
-        // unreachable instance, and Stop frees the slot for a retry.
-        let used = Set(instances.map(\.offset))
-        guard let offset = stride(from: 0, through: 30_000, by: 1_000)
-            .first(where: { !used.contains($0) }) else {
-            throw LabError.noFreeSlot
+    ) throws -> LabCluster {
+        let clusterDirectory = clustersRoot
+            .appendingPathComponent(scenario.slug, isDirectory: true)
+
+        var members: [LabMember] = []
+        var clusterID: String?
+        var rootPort: Int?
+
+        for index in 1...scenario.processes {
+            let memberDirectory = clusterDirectory
+                .appendingPathComponent("member-\(index)", isDirectory: true)
+            let derived = try ScenarioConfig.derive(
+                source: source,
+                instanceDirectory: memberDirectory,
+                slug: scenario.slug,
+                index: index
+            )
+
+            try fileManager.createDirectory(
+                at: memberDirectory.appendingPathComponent("state", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            let configURL = memberDirectory.appendingPathComponent("config.yaml")
+            try derived.text.write(to: configURL, atomically: true, encoding: .utf8)
+
+            clusterID = derived.clusterID
+            rootPort = derived.rootPort
+
+            members.append(LabMember(
+                index: index,
+                isotope: derived.isotope,
+                preferredHealthPort: derived.preferredHealthPort,
+                configPath: configURL.path,
+                pidPath: memberDirectory.appendingPathComponent("ocd-smoke-alarm.pid").path,
+                logPath: memberDirectory.appendingPathComponent("alarm.log").path,
+                stateDir: memberDirectory.appendingPathComponent("state", isDirectory: true).path
+            ))
         }
 
-        let directory = instancesRoot
-            .appendingPathComponent("\(scenario.slug)-\(offset)", isDirectory: true)
-        let derived = try ScenarioConfig.derive(
-            source: source,
-            instanceDirectory: directory,
-            offset: offset
-        )
-
-        try fileManager.createDirectory(
-            at: directory.appendingPathComponent("state", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        let configURL = directory.appendingPathComponent("config.yaml")
-        try derived.text.write(to: configURL, atomically: true, encoding: .utf8)
-
-        let instance = Instance(
+        return LabCluster(
             scenarioID: scenario.file,
             name: scenario.name,
             slug: scenario.slug,
-            offset: offset,
-            healthPort: derived.healthPort,
-            configPath: configURL.path,
-            pidPath: directory.appendingPathComponent("ocd-smoke-alarm.pid").path,
-            startedAt: .now
+            clusterID: clusterID,
+            rootPort: rootPort,
+            startedAt: .now,
+            members: members
         )
-        return Prepared(instance: instance)
+    }
+
+    /// A launch is not finished when `lezz` exits; it is finished when the
+    /// cluster answers. Give self-negotiation a few seconds, then say what to
+    /// read if it never does.
+    private func waitForHealth(_ cluster: LabCluster) async {
+        for _ in 0..<30 {
+            await refresh(cluster)
+            if states[cluster.id] == .running { return }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        states[cluster.id] = .unreachable
+        lastError = "\(cluster.name) did not answer on the federation root or its health ports. "
+            + "Reveal the cluster directory to read member-1/alarm.log."
     }
 
     // MARK: - Stop
 
-    func stop(_ instance: Instance) async {
-        guard !busy.contains(instance.id) else { return }
+    func stop(_ cluster: LabCluster) async {
+        guard !busy.contains(cluster.id) else { return }
 
-        busy.insert(instance.id)
-        defer { busy.remove(instance.id) }
+        busy.insert(cluster.id)
+        defer { busy.remove(cluster.id) }
 
-        do {
-            let status = try runLezz([
+        for member in cluster.members {
+            _ = try? runLezz([
                 "run", "ocd-smoke-alarm", "ops", "stop",
-                "-pid-file", instance.pidPath,
-            ], wait: true)
-            guard status == 0 else {
-                throw LabError.launcherRejected("ops stop exited \(status)")
-            }
+                "-pid-file", member.pidPath,
+            ], log: nil, wait: true)
+        }
 
-            for _ in 0..<10 {
-                if await isHealthy(instance) == false { break }
-                try? await Task.sleep(for: .milliseconds(300))
+        var stopped = false
+        for _ in 0..<10 {
+            await refresh(cluster)
+            if await membersAnswering(cluster) == 0 {
+                stopped = true
+                break
             }
-            removeMetadata(instance)
-        } catch {
-            lastError = error.localizedDescription
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+
+        if stopped {
+            removeMetadata(cluster)
+        } else {
+            // Keep the contract so the operator can try again: a member that
+            // ignored `ops stop` is still stoppable, and hiding it would make
+            // the port look free when it is not.
+            states[cluster.id] = .unreachable
+            lastError = "\(cluster.name) did not stop. Its log is in the cluster directory."
         }
     }
 
-    func reveal(_ instance: Instance) {
-        NSWorkspace.shared.activateFileViewerSelecting([instance.directory])
+    func reveal(_ cluster: LabCluster) {
+        guard let directory = cluster.members.first?.directory else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([directory.deletingLastPathComponent()])
     }
 
     // MARK: - Health
 
     func monitor() async {
         while !Task.isCancelled {
-            await refreshHealth()
+            loadClusters()
+            for cluster in clusters {
+                await refresh(cluster)
+            }
             try? await Task.sleep(for: .seconds(3))
         }
     }
 
     func refreshHealth() async {
-        for instance in instances {
-            if await isHealthy(instance) {
-                states[instance.id] = .running
-            } else if states[instance.id] == .running {
-                states[instance.id] = .unreachable
+        loadClusters()
+        for cluster in clusters {
+            await refresh(cluster)
+        }
+    }
+
+    private func refresh(_ cluster: LabCluster) async {
+        let (state, up) = await health(cluster)
+        states[cluster.id] = state
+        membersUp[cluster.id] = up
+
+        // The badge needs membership only; the adhd block needs the port each
+        // member bound. Resolve those here so both are available before the
+        // operator copies anything.
+        await resolvePorts(for: cluster)
+    }
+
+    /// A federation cluster is whole when its root answers and every member's
+    /// isotope is in the membership view under one agreement. A single-process
+    /// sample has no root, so it is whole when its own `/status` answers and
+    /// names the isotope.
+    private func health(_ cluster: LabCluster) async -> (RunState, Int) {
+        if let url = cluster.membershipURL {
+            guard let membership = try? await fetchMembership(url) else {
+                return (.unreachable, 0)
+            }
+            return Self.evaluate(cluster: cluster, membership: membership)
+        }
+
+        let up = await membersAnswering(cluster)
+        switch up {
+        case 0: return (.unreachable, 0)
+        case cluster.members.count: return (.running, up)
+        default: return (.partial, up)
+        }
+    }
+
+    /// The decision the badge shows, separated from the network so it can be
+    /// tested: a root that names every member under this cluster's agreement is
+    /// whole, a root that names some of them is partial, and a root whose
+    /// agreement differs is somebody else's cluster on our port.
+    nonisolated static func evaluate(
+        cluster: LabCluster,
+        membership: FederationMembership
+    ) -> (RunState, Int) {
+        let expected = Set(cluster.members.map(\.isotope))
+        let up = expected.intersection(membership.serviceNames).count
+
+        if let agreement = cluster.clusterID,
+           membership.clusterIDs != [agreement] {
+            return (.unreachable, up)
+        }
+        return up == expected.count ? (.running, up) : (.partial, up)
+    }
+
+    private func membersAnswering(_ cluster: LabCluster) async -> Int {
+        var up = 0
+        for member in cluster.members {
+            if await isLive(member) { up += 1 }
+        }
+        return up
+    }
+
+    private func isLive(_ member: LabMember) async -> Bool {
+        if let port = await resolvePort(member) {
+            return await statusNames(member, port: port, timeout: 1.5)
+        }
+        return false
+    }
+
+    /// Finds the port a member actually bound.
+    ///
+    /// Loopback does not need the local-network permission mDNS does, so the
+    /// app never makes a 127.0.0.1 port depend on it: the preferred port is
+    /// scanned upward, exactly as the health server scans for a free one, and a
+    /// candidate is accepted only when `/status` names this member's isotope. A
+    /// port that answers for another process is not this member — the rotated
+    /// isotope is what makes that check possible.
+    private func resolvePort(_ member: LabMember) async -> Int? {
+        if let cached = resolvedPorts[member.isotope] {
+            if await statusNames(member, port: cached, timeout: 1.5) {
+                return cached
+            }
+            resolvedPorts[member.isotope] = nil
+        }
+
+        // When the advertisement did arrive it is authoritative and saves the
+        // scan; it is an optimisation, not the mechanism.
+        if let advertised = advertisedPorts[member.isotope],
+           await statusNames(member, port: advertised, timeout: 1.5) {
+            resolvedPorts[member.isotope] = advertised
+            return advertised
+        }
+
+        for offset in 0...scanWindow {
+            let port = member.preferredHealthPort + offset
+            if await statusNames(member, port: port, timeout: 0.4) {
+                resolvedPorts[member.isotope] = port
+                return port
+            }
+        }
+        return nil
+    }
+
+    /// The health server retries ten ports upward; the window is wider than
+    /// that so several members starting at the same preferred port all fit.
+    private let scanWindow = 40
+
+    private func resolvePorts(for cluster: LabCluster) async {
+        for member in cluster.members {
+            _ = await resolvePort(member)
+        }
+    }
+
+    private func statusNames(_ member: LabMember, port: Int, timeout: TimeInterval) async -> Bool {
+        guard let status = try? await fetchStatus(member.healthURL(port: port), timeout: timeout) else {
+            return false
+        }
+        return status.live == true && status.service == member.isotope
+    }
+
+    private func applyAdvertisedPorts() {
+        for member in clusters.flatMap(\.members) {
+            if let port = advertisedPorts[member.isotope] {
+                resolvedPorts[member.isotope] = port
             }
         }
     }
 
-    private func waitForHealth(_ instance: Instance) async {
-        for _ in 0..<20 {
-            if await isHealthy(instance) {
-                states[instance.id] = .running
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(400))
-        }
-        states[instance.id] = .unreachable
-        lastError = "\(instance.name) did not answer on 127.0.0.1:\(instance.healthPort)."
-    }
-
-    private func isHealthy(_ instance: Instance) async -> Bool {
-        var request = URLRequest(url: instance.healthURL)
+    private func fetchMembership(_ url: URL) async throws -> FederationMembership {
+        var request = URLRequest(url: url)
         request.timeoutInterval = 2
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw LabError.launcherRejected("membership exited \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        return try JSONDecoder().decode(FederationMembership.self, from: data)
+    }
 
-        guard
-            let (data, response) = try? await URLSession.shared.data(for: request),
-            (response as? HTTPURLResponse)?.statusCode == 200,
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-
-        return object["live"] as? Bool == true
+    private func fetchStatus(_ url: URL, timeout: TimeInterval = 2) async throws -> AlarmStatus {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw LabError.launcherRejected("status exited \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        return try JSONDecoder().decode(AlarmStatus.self, from: data)
     }
 
     // MARK: - Storage
 
-    private var instancesRoot: URL {
+    /// One directory per scenario. `cluster.json` names the members; the app
+    /// does not care who wrote it.
+    private var clustersRoot: URL {
         let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent("LezzSea/Instances", isDirectory: true)
+        return support.appendingPathComponent("LezzSea/Clusters", isDirectory: true)
     }
 
-    private func loadInstances() {
+    private func loadClusters() {
         guard let directories = try? fileManager.contentsOfDirectory(
-            at: instancesRoot,
+            at: clustersRoot,
             includingPropertiesForKeys: nil
         ) else { return }
 
-        instances = directories.compactMap { directory in
-            let url = directory.appendingPathComponent("instance.json")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let found = directories.compactMap { directory -> LabCluster? in
+            let url = directory.appendingPathComponent("cluster.json")
             guard
                 let data = try? Data(contentsOf: url),
-                let instance = try? JSONDecoder().decode(Instance.self, from: data)
+                let cluster = try? decoder.decode(LabCluster.self, from: data)
             else { return nil }
-            return instance
+            return cluster
         }
         .sorted { $0.startedAt < $1.startedAt }
 
-        for instance in instances {
-            states[instance.id] = .starting
+        // Keep the state of clusters that are still listed so the badge does
+        // not flicker back to `starting` on every monitor tick.
+        clusters = found
+        let listed = Set(found.map(\.id))
+        for id in Array(states.keys) where !listed.contains(id) {
+            states[id] = nil
+            membersUp[id] = nil
         }
+        for cluster in found where states[cluster.id] == nil {
+            states[cluster.id] = .starting
+        }
+        startWatchingIfNeeded()
     }
 
-    private func writeMetadata(_ instance: Instance) throws {
-        let data = try JSONEncoder().encode(instance)
+    private func writeMetadata(_ cluster: LabCluster) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(cluster)
         try data.write(
-            to: instance.directory.appendingPathComponent("instance.json"),
+            to: clusterDirectory(cluster).appendingPathComponent("cluster.json"),
             options: .atomic
         )
     }
 
-    private func removeMetadata(_ instance: Instance) {
-        try? fileManager.removeItem(at: instance.directory.appendingPathComponent("instance.json"))
-        instances.removeAll { $0.id == instance.id }
-        states[instance.id] = nil
+    private func removeMetadata(_ cluster: LabCluster) {
+        try? fileManager.removeItem(at: clusterDirectory(cluster).appendingPathComponent("cluster.json"))
+        clusters.removeAll { $0.id == cluster.id }
+        states[cluster.id] = nil
+        membersUp[cluster.id] = nil
+        for member in cluster.members {
+            resolvedPorts[member.isotope] = nil
+        }
+    }
+
+    private func clusterDirectory(_ cluster: LabCluster) -> URL {
+        clustersRoot.appendingPathComponent(cluster.slug, isDirectory: true)
     }
 
     // MARK: - lezz
@@ -378,7 +591,11 @@ final class ScenarioLab {
 
     /// Runs `lezz` with a fixed, app-built argument list. The Lab build is
     /// unsandboxed, so the alarm it execs can bind its ports and write state.
-    private func runLezz(_ arguments: [String], wait: Bool) throws -> Int32 {
+    /// A launched alarm's output goes to the member's own log: the bound port
+    /// and the elected role are lines in it, and a failed launch is otherwise
+    /// a mystery.
+    @discardableResult
+    private func runLezz(_ arguments: [String], log: String?, wait: Bool) throws -> Int32 {
         #if LAB_LAUNCHER
         guard let lezz = lezzBinary() else {
             throw LabError.lezzMissing
@@ -387,8 +604,23 @@ final class ScenarioLab {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: lezz)
         process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+
+        if let log {
+            if !fileManager.fileExists(atPath: log) {
+                fileManager.createFile(atPath: log, contents: nil)
+            }
+            if let handle = FileHandle(forWritingAtPath: log) {
+                _ = try? handle.seekToEnd()
+                process.standardOutput = handle
+                process.standardError = handle
+            } else {
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+            }
+        } else {
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+        }
 
         // LaunchServices gives a GUI app a minimal PATH; the npx/uvx probes
         // need the Homebrew paths a terminal would have.
@@ -411,15 +643,12 @@ final class ScenarioLab {
 }
 
 enum LabError: LocalizedError {
-    case noFreeSlot
     case labBuildRequired
     case lezzMissing
     case launcherRejected(String)
 
     var errorDescription: String? {
         switch self {
-        case .noFreeSlot:
-            "All lab slots are in use. Stop an instance and try again."
         case .labBuildRequired:
             "Launching needs the Lab build of lezz.sea; the App Store build only copies commands."
         case .lezzMissing:

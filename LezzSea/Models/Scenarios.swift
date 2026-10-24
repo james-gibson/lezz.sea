@@ -12,9 +12,11 @@
 //  and the dev/QA harness are deliberately left out: they are not scenarios an
 //  operator picks.
 //
-//  Launching a lab cluster from one of these is the next step, not this one.
-//  ADR 0017 makes identity, key and port the launcher's responsibility, and
-//  none of that belongs in a viewer until it can be done honestly.
+//  Launching a single-process scenario is the Lab build's job; a multi-process
+//  cluster is started by scripts/lab-cluster.sh until the launcher's discovery
+//  has been verified against one. ADR 0017 makes identity, key and port the
+//  launcher's responsibility, and none of that belongs in a viewer until it
+//  can be done honestly.
 //
 
 import Foundation
@@ -77,6 +79,10 @@ enum ScenarioCatalog {
         /// The health server's port in the sample, used to pair adhd with it.
         let healthPort: Int
         let theme: Theme
+        /// How many processes one lab cluster of this scenario runs. Only
+        /// samples that document a run count set this above one; the rest are
+        /// a single alarm whose topology lives in `targets`.
+        var processes: Int = 1
         /// A caveat worth knowing before running it, when the sample carries one.
         var note: String? = nil
 
@@ -86,6 +92,11 @@ enum ScenarioCatalog {
         var slug: String {
             file.replacingOccurrences(of: ".yaml", with: "")
         }
+
+        /// True when the app's launcher can start it. Multi-process clusters
+        /// are launched with `scripts/lab-cluster.sh` until the launcher's
+        /// discovery has been verified against them.
+        var isLaunchable: Bool { processes == 1 }
 
         /// The command the lab uses to start a managed tool. `lezz` owns the
         /// binary, so the viewer points at the launcher rather than at a Go
@@ -99,16 +110,28 @@ enum ScenarioCatalog {
         /// `gherkin_files` are a separate decision because they depend on
         /// where the smoke-alarm checkout lives.
         ///
-        /// Pass the running instance's port when one exists: the launcher
-        /// remaps the sample's fixed health port.
-        func adhdSmokeAlarmBlock(healthPort: Int? = nil) -> String {
-            """
-            smoke_alarm:
-              - name: "\(slug)"
-                endpoint: "http://127.0.0.1:\(healthPort ?? self.healthPort)"
-                interval: 10s
-            """
+        /// Pass the running instance's ports when they exist: the alarm
+        /// self-negotiates its health port, so the sample's port is only the
+        /// first member's preference. One entry per member keeps a federation
+        /// cluster visible to adhd as more than its leader.
+        func adhdSmokeAlarmBlock(healthPorts: [Int] = []) -> String {
+            let ports = healthPorts.isEmpty ? [healthPort] : healthPorts
+            let entries = ports.enumerated().map { offset, port in
+                let name = ports.count == 1 ? slug : "\(slug)-\(offset + 1)"
+                return """
+                  - name: "\(name)"
+                    endpoint: "http://127.0.0.1:\(port)"
+                    interval: 10s
+                """
+            }
+            return (["smoke_alarm:"] + entries).joined(separator: "\n")
         }
+
+        /// A single-port block, for the common one-process case.
+        func adhdSmokeAlarmBlock(healthPort: Int?) -> String {
+            adhdSmokeAlarmBlock(healthPorts: [healthPort ?? self.healthPort])
+        }
+
 
         /// The config at the commit this catalog was transcribed from.
         var url: URL {
@@ -188,7 +211,8 @@ enum ScenarioCatalog {
                 useCase: "A three-instance mesh that self-elects an introducer; no external targets.",
                 healthPort: 18088,
                 theme: .federation,
-                note: "Run three processes against the same config; each claims a slot on ports 5100–5102."
+                processes: 3,
+                note: "Three processes share ports 5100–5103 and 18088: the first claims the leader slot, the rest become followers that announce at the root."
             ),
             Scenario(
                 file: "federation-chain.yaml",

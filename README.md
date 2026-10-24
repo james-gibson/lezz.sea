@@ -36,10 +36,12 @@ that cluster's lab can run.
 - **Scenarios.** smoke-alarm's ready-to-run config catalog, grouped by theme —
   transport, federation, warroom, auth, deployment, discovery — with the
   `lezz run` command, an adhd `smoke_alarm` block, and a link to the YAML. In
-  the Lab build a row launches the scenario: it derives a config with absolute
-  state and remapped ports, runs the alarm headless, shows its health port, and
-  stops it. The sandboxed build copies the command and the block instead. See
-  `docs/scenarios.md`.
+  the Lab build a row launches a single-process scenario: it derives a config
+  with absolute state, rotates the isotope name for mDNS, runs the alarm
+  headless, learns the port it bound, and stops it. Multi-process clusters are
+  started by `scripts/lab-cluster.sh` until the launcher's discovery has been
+  verified against them. The sandboxed build copies the command and the block
+  instead. See `docs/scenarios.md`.
 - **Discovery.** Checks the lezz cluster registry (`:19100/cluster`), probes the
   default adhd endpoint (`127.0.0.1:9090/mcp`), and watches Bonjour for
   `_adhd-isotope._tcp`.
@@ -79,6 +81,19 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
 It runs `lezz` and the alarm that `lezz` execs. It is a developer build and is
 not submitted to the App Store.
 
+Launch a cluster the way the launcher should, from outside the app, and verify
+it before pointing the UI at it:
+
+```sh
+scripts/lab-cluster.sh configs/samples/federation-mesh.yaml --pair-adhd
+```
+
+It works in a private `mktemp -d` under `$TMPDIR`, resolves the ports the
+members actually bound, checks the federation root's membership and every
+member's isotope list, and registers `cluster.json` so the Scenarios panel shows
+the cluster. `--stop <slug>` stops it. Agents can load the `lab-cluster` skill
+(`.claude/skills/lab-cluster/SKILL.md`), which wraps the same script.
+
 Run the unit and UI tests with:
 
 ```sh
@@ -91,7 +106,10 @@ never shrinks below its floor, and the panel switch moves between panes. They
 also check that the lights table's rightmost column stays inside the window,
 that the isotope chart and boundary list render without a cluster, and that the
 scenario filter narrows the catalog and both clipboard payloads are exact. The
-unit tests also pin the derived config's port remap and absolute state paths.
+unit tests also pin the derived config's isotope rotation, agreement and
+absolute state paths. `LezzSeaUITests/LabClusterUITests.swift` checks a
+script-launched cluster against the Lab build; run it after
+`scripts/lab-cluster.sh` (the command is in `docs/scenarios.md`).
 
 ## Accessibility
 
@@ -214,12 +232,21 @@ access to that file; subsequent launches reuse the stored bookmark.
   start an external process from the sandbox, and an SMAppService agent
   registered by a sandboxed app must itself be sandboxed — which cannot exec
   `lezz`. The Lab build runs it directly; the App Store build copies commands.
-- **Ports, not loopback aliases.** macOS will not bind `127.0.0.N` without a
-  root-added alias. The derived config moves the health, auth, hosted and
-  federation ports by a per-instance offset and rewrites self-references; two
-  scenarios were verified running together on `127.0.0.1`.
+- **Ports self-negotiate; identity is rotated.** The alarm already claims what
+  is free: the health server scans upward on `EADDRINUSE` and advertises the
+  bound port, and the federation claims the first slot in its range, so the
+  first process is the introducer. The launcher therefore leaves ports alone,
+  rotates `service.name` per member (the mDNS instance name), turns
+  `tuner.advertise` on, and keeps a `cluster_id` agreement only when the sample
+  declares one — it never invents self-trust for a sample that omitted it.
+  The bound port is found by scanning loopback upward and accepting only a port whose `/status` names the isotope —
+  mDNS is used when it answers, but a `127.0.0.1` port must not depend on the
+  local-network permission. The derived state is absolute and per-member. See
+  `docs/scenarios.md`.
 - **The sample is never edited.** Each launch writes a derived config and an
-  absolute state directory under `Application Support/LezzSea/Instances`.
+  absolute state directory under
+  `Application Support/LezzSea/Clusters/<slug>/member-<n>/`, next to the
+  `cluster.json` that describes the cluster.
 - **The panel is not a `TabView`.** On macOS a `TabView` with `.tabItem` draws
   its own strip over the content, which overlapped the summary bar. The panel is
   a toolbar picker bound to `AppModel.tab` and the detail pane switches in
@@ -240,8 +267,9 @@ LezzSea/
   Models/NuclideChart.swift threat classes, isotopes, decay channels
   Models/Boundaries.swift   invariants, the test that holds each, its failure
   Models/Scenarios.swift    smoke-alarm's sample configs, grouped by theme
-  Models/ScenarioConfig.swift  per-instance config derivation (state, ports)
-  Support/ScenarioLab.swift  checkout bookmark, slot allocation, launch/stop
+  Models/ScenarioConfig.swift  per-member config derivation (state, isotope, agreement)
+  Models/LabCluster.swift   cluster.json, members, federation membership
+  Support/ScenarioLab.swift  checkout bookmark, launch/stop, cluster health
   Services/                 JSON-RPC client, file tail, Bonjour, URL normalising
   Support/                  status naming, layout metrics, VoiceOver announcements
   Views/                    sidebar, dashboard, lights, events, isotopes, boundaries, scenarios, settings
