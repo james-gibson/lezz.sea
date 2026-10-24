@@ -7,25 +7,70 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isTargeted = false
+
+    /// The poll loop moves offline → connecting → offline every few seconds.
+    /// Announce only the transition into each state, not every retry.
+    @State private var announcedOnline = false
+    @State private var announcedOffline = false
 
     var body: some View {
         @Bindable var model = model
 
         NavigationSplitView {
             ClusterSidebar()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+                .navigationSplitViewColumnWidth(
+                    min: LayoutMetrics.sidebarMinimumWidth,
+                    ideal: 250,
+                    max: LayoutMetrics.sidebarMaximumWidth
+                )
         } detail: {
             DashboardView()
         }
         .navigationSplitViewStyle(.balanced)
         .navigationTitle(model.selectedCluster?.name ?? "lezz.sea")
-        .navigationSubtitle(model.selectedCluster?.endpoint.absoluteString ?? "adhd lights and MCP traffic")
+        .navigationSubtitle(
+            model.selectedCluster?.endpoint.absoluteString
+                ?? "adhd lights and MCP traffic"
+        )
+        // The floor that stops the sidebar and the detail pane from sharing
+        // pixels. Paired with `.windowResizability(.contentMinSize)` in
+        // LezzSeaApp, AppKit refuses to shrink the window past it.
+        .frame(
+            minWidth: LayoutMetrics.minimumWindowWidth,
+            minHeight: LayoutMetrics.minimumWindowHeight
+        )
         .toolbar {
+            // The panel switch lives in the toolbar, not in a `TabView` strip
+            // floating over the content. A toolbar item cannot overlap the
+            // summary bar or the table header, and macOS gives it the standard
+            // overflow behaviour when the window is narrow.
+            ToolbarItem(placement: .principal) {
+                Picker("Panel", selection: $model.tab) {
+                    ForEach(AppModel.Tab.allCases) { tab in
+                        Label(tab.title, systemImage: tab.symbol)
+                            // When the toolbar collapses to icon-only, the
+                            // segment's default accessibility label becomes the
+                            // SF Symbol name ("waveform.path.ecg"). Name the
+                            // segment explicitly instead.
+                            .accessibilityLabel(tab.title)
+                            .tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+                .help("Switch between Lights and Events (⌘1 / ⌘2)")
+                .accessibilityValue(model.tab.title)
+                .accessibilityIdentifier("toolbar.panel")
+            }
+
             ToolbarItemGroup(placement: .primaryAction) {
                 if model.isDiscovering {
                     ProgressView()
                         .controlSize(.small)
+                        .accessibilityLabel("Discovering clusters")
                 }
 
                 Button {
@@ -34,13 +79,18 @@ struct ContentView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .help("Refresh lights (⌘R)")
+                .accessibilityIdentifier("toolbar.refresh")
 
                 Button {
                     Task { await model.discover() }
                 } label: {
-                    Label("Discover Clusters", systemImage: "antenna.radiowaves.left.and.right")
+                    Label(
+                        "Discover Clusters",
+                        systemImage: "antenna.radiowaves.left.and.right"
+                    )
                 }
                 .help("Discover adhd clusters (⇧⌘R)")
+                .accessibilityIdentifier("toolbar.discover")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -57,13 +107,45 @@ struct ContentView: View {
                 DropOverlay()
             }
         }
-        .overlay(alignment: .top) {
+        // The toast sits above the status bar (26pt) rather than under the
+        // toolbar, where it used to cover the summary bar and the first table
+        // row. Padding is the status bar plus a gap.
+        .overlay(alignment: .bottom) {
             ToastView()
-                .animation(.easeInOut(duration: 0.2), value: model.toast)
+                .padding(.bottom, 40)
+                .allowsHitTesting(false)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.2),
+                    value: model.toast
+                )
         }
         .sheet(isPresented: $model.isAddingCluster) {
             AddClusterSheet()
                 .environment(model)
+        }
+        .onChange(of: model.connection) { _, connection in
+            announceIfNeeded(connection)
+        }
+        .accessibilityIdentifier("content.root")
+    }
+
+    private func announceIfNeeded(_ connection: AppModel.Connection) {
+        switch connection {
+        case .online:
+            guard !announcedOnline else { return }
+            announcedOnline = true
+            announcedOffline = false
+            let name = model.selectedCluster?.name ?? "the cluster"
+            AccessibilityAnnouncer.announce("Connected to \(name)")
+
+        case .offline(let message):
+            guard !announcedOffline else { return }
+            announcedOffline = true
+            announcedOnline = false
+            AccessibilityAnnouncer.announce("Cluster unreachable. \(message)", priority: .high)
+
+        case .idle, .connecting:
+            break
         }
     }
 }
@@ -80,8 +162,11 @@ private struct DropOverlay: View {
                 Image(systemName: "arrow.down.doc")
                     .font(.system(size: 38, weight: .light))
                     .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+
                 Text("Drop a log or cluster config")
                     .font(.headline)
+
                 Text("A .jsonl file streams as events. A .yaml or .json config adds its adhd endpoint.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -96,6 +181,9 @@ private struct DropOverlay: View {
         }
         .allowsHitTesting(false)
         .transition(.opacity)
+        // A drop target is a passive surface; the drop itself is announced by
+        // the toast. Keep it out of the VoiceOver element tree.
+        .accessibilityHidden(true)
     }
 }
 
@@ -103,6 +191,7 @@ private struct DropOverlay: View {
 
 private struct ToastView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if let toast = model.toast {
@@ -115,11 +204,16 @@ private struct ToastView: View {
                     Capsule().strokeBorder(.separator, lineWidth: 0.5)
                 }
                 .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
-                .padding(.top, 10)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityLabel("Notice: \(toast)")
+                .accessibilityAddTraits(.isStaticText)
                 .task(id: toast) {
+                    AccessibilityAnnouncer.announce(toast)
                     try? await Task.sleep(for: .seconds(3))
-                    withAnimation { model.toast = nil }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                        model.toast = nil
+                    }
                 }
         }
     }
@@ -132,9 +226,10 @@ private struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(connectionColor)
-                .frame(width: 7, height: 7)
+            Image(systemName: connectionSymbol)
+                .foregroundStyle(connectionColor)
+                .imageScale(.small)
+                .accessibilityHidden(true)
 
             Text(model.connection.label)
                 .lineLimit(1)
@@ -142,6 +237,7 @@ private struct StatusBar: View {
             if let lastRefresh = model.lastRefresh {
                 Text("· \(lastRefresh, format: .relative(presentation: .named))")
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             Spacer(minLength: 12)
@@ -158,6 +254,18 @@ private struct StatusBar: View {
         .padding(.vertical, 5)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("status.connection")
+    }
+
+    /// Shape as well as colour, for Differentiate Without Colour.
+    private var connectionSymbol: String {
+        switch model.connection {
+        case .idle: "circle"
+        case .connecting: "arrow.triangle.2.circlepath"
+        case .online: "checkmark.circle.fill"
+        case .offline: "exclamationmark.triangle.fill"
+        }
     }
 
     private var connectionColor: Color {

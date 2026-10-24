@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for the Mac App Store. The app has no privileged helpers. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<!-- adhd's JSON-RPC endpoint, the cluster registry, and Bonjour browsing.
+	     No inbound network service is opened, so network.server stays out. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- The traffic log lives outside the container. The user chooses it in an
+	     open panel (or drops it on the window); a security-scoped bookmark
+	     keeps that grant across launches. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+</dict>
+</plist>

@@ -7,5 +7,21 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+
+	<!-- Bonjour discovery of _adhd-isotope._tcp triggers the local network
+	     privacy prompt on macOS 15 and later. Both keys are required: the
+	     purpose string explains the prompt, and the service list declares
+	     exactly what the app browses. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>lezz.sea looks for adhd clusters announced with Bonjour on your local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_adhd-isotope._tcp</string>
+	</array>
+
+	<!-- The app speaks HTTP/JSON to a cluster on loopback or the lab LAN. It
+	     implements no cryptography of its own. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

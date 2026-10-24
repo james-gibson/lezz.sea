@@ -2,8 +2,6 @@
 //  LezzSeaUITestsLaunchTests.swift
 //  LezzSeaUITests
 //
-//  Created by dev on 10/21/26.
-//
 
 import XCTest
 
@@ -22,8 +20,10 @@ final class LezzSeaUITestsLaunchTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
+        XCTAssertTrue(
+            app.windows.firstMatch.waitForExistence(timeout: 30),
+            "main window did not appear"
+        )
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

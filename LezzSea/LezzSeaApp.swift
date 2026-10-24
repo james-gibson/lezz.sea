@@ -15,11 +15,19 @@ struct LezzSeaApp: App {
                 .environment(model)
                 .task { await model.start() }
         }
-        .defaultSize(width: 1_120, height: 720)
+        .defaultSize(
+            width: LayoutMetrics.preferredWindowWidth,
+            height: LayoutMetrics.preferredWindowHeight
+        )
+        // AppKit enforces ContentView's minimum frame. Without this the window
+        // can be dragged small enough that the sidebar and detail pane fight
+        // for the same pixels.
+        .windowResizability(.contentMinSize)
         .commands { AppCommands(model: model) }
 
         Settings {
             SettingsView(model: model)
         }
+        .windowResizability(.contentMinSize)
     }
 }
