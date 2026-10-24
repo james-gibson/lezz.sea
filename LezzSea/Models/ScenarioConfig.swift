@@ -4,17 +4,24 @@
 //
 //  Derives a per-instance smoke-alarm config from a sample.
 //
-//  Two things make a sample unsafe to run twice as written: every instance
-//  writes relative state into the checkout, and several instances want the
-//  same fixed ports (18088 for health, 8877 for the mock auth server, and so
-//  on). macOS will not let an unprivileged process bind 127.0.0.2, so the
-//  isolation is a port offset on loopback rather than a second loopback
-//  address.
+//  A scenario's instances are not told apart by moving their ports. They are
+//  told apart by identity, and by what the alarm already does when a port is
+//  taken:
 //
-//  The rewrite is deliberately narrow: only the listener ports declared by
-//  `health`, `auth`, `hosted` and the federation slot range move, plus the
-//  self-references to those exact ports. A target pointing at some other
-//  localhost service is left alone.
+//  - `health` binds its preferred port and scans upwards on EADDRINUSE, then
+//    advertises the port it actually bound over mDNS;
+//  - `federation` claims the first free slot in its range, so the first
+//    process becomes the introducer and the rest become followers announcing
+//    at the root (`http://localhost:<base_port>`).
+//
+//  So the rewrite leaves every port alone and rotates the isotope instead: the
+//  service name is what mDNS prints, and it has to be unique per instance or
+//  three instances share one advertisement. The federation cluster id is the
+//  agreement peers need to trust each other by construction; the launcher
+//  supplies one when the sample does not.
+//
+//  What it does change is state: every instance writes its own absolute
+//  runtime paths, so two instances never share a lock file or a baseline.
 //
 
 import Foundation
@@ -23,27 +30,52 @@ enum ScenarioConfig {
 
     struct Derived: Sendable {
         let text: String
-        /// The remapped health port, used for `/status` and the adhd block.
-        let healthPort: Int
-        /// Every port this instance will bind; the launcher checks them free.
-        let ports: [Int]
+        /// The isotope name this instance advertises. Also the mDNS instance
+        /// name, and the key the launcher uses to find the bound port.
+        let isotope: String
+        /// The health port the instance asks for. It may bind the next free
+        /// one instead, which is why the advertised port is authoritative.
+        let preferredHealthPort: Int
+        /// The federation slot range's first port — the root a follower
+        /// announces at, and the leader's slot when this instance is first.
+        let rootPort: Int?
+        /// The cluster identity the instance announces. Same value for every
+        /// member of one launch, which is the isotope agreement.
+        let clusterID: String?
     }
 
     enum DeriveError: LocalizedError {
         case noHealthListener
+        case noServiceName
         case missingRuntimeKey(String)
-        case portOutOfRange(Int)
 
         var errorDescription: String? {
             switch self {
             case .noHealthListener:
                 "The sample does not declare a health listener."
+            case .noServiceName:
+                "The sample does not declare service.name."
             case .missingRuntimeKey(let key):
                 "The sample does not declare runtime.\(key)."
-            case .portOutOfRange(let port):
-                "Port \(port) is outside the valid range after remapping."
             }
         }
+    }
+
+    /// The service type the alarm advertises. A constant: it is the discovery
+    /// channel the app and adhd both browse.
+    static let discoveryType = "_smoke-alarm._tcp"
+
+    /// The isotope name an instance advertises. The base is the sample's own
+    /// service name, so a lab cluster still reads as the product it is; the
+    /// suffix makes it unique on the wire.
+    static func isotopeName(base: String, slug: String, index: Int) -> String {
+        "\(base)-\(slug)-\(index)"
+    }
+
+    /// The cluster identity every member of one launch announces. `slug` keeps
+    /// two scenarios on one machine from sharing an agreement by accident.
+    static func clusterID(slug: String) -> String {
+        "lezzsea-\(slug)"
     }
 
     // MARK: - Derivation
@@ -51,115 +83,173 @@ enum ScenarioConfig {
     static func derive(
         source: String,
         instanceDirectory: URL,
-        offset: Int
+        slug: String,
+        index: Int
     ) throws -> Derived {
         let lines = source.components(separatedBy: .newlines)
 
-        // First pass: find the listeners and the federation slot range.
+        // First pass: identity, ports, and which sections exist.
         var section = ""
+        var baseServiceName: String?
         var health: Int?
-        var basePorts = Set<Int>()
-        var federationRange: ClosedRange<Int>?
+        var rootPort: Int?
+        var declaredClusterID: String?
+        var hasTuner = false
+        var hasFederation = false
+        var hasClusterLine = false
 
         for line in lines {
             if let name = topLevelName(line) {
                 section = name
+                if name == "tuner" { hasTuner = true }
+                if name == "federation" { hasFederation = true }
+                continue
             }
 
-            if ["health", "auth", "hosted"].contains(section),
-               let address = listenAddress(line),
-               let port = address.port,
-               port != 0,
-               isLocalHost(address.host) {
-                basePorts.insert(port)
-                if section == "health", health == nil {
+            switch section {
+            case "service":
+                if keyName(line) == "name", let value = stringValue(line) {
+                    baseServiceName = value
+                }
+            case "health":
+                if keyName(line) == "listen_addr",
+                   let address = listenAddress(line),
+                   let port = address.port,
+                   port != 0,
+                   isLocalHost(address.host),
+                   health == nil {
                     health = port
                 }
-            }
-
-            if section == "federation",
-               let key = keyName(line),
-               (key == "base_port" || key == "max_port"),
-               let value = intValue(line) {
-                basePorts.insert(value)
-                if key == "base_port" {
-                    federationRange = value...value
-                } else if let range = federationRange {
-                    federationRange = min(range.lowerBound, value)...max(range.upperBound, value)
+            case "federation":
+                if keyName(line) == "base_port", let value = intValue(line) {
+                    rootPort = value
                 }
+                if keyName(line) == "cluster_id" {
+                    hasClusterLine = true
+                    declaredClusterID = stringValue(line)
+                }
+            default:
+                break
             }
         }
 
         guard let health else { throw DeriveError.noHealthListener }
+        guard let baseServiceName else { throw DeriveError.noServiceName }
 
-        var mapping: [Int: Int] = [:]
-        for port in basePorts {
-            mapping[port] = port + offset
-        }
-        if let range = federationRange {
-            for port in range {
-                mapping[port] = port + offset
-            }
-        }
+        let isotope = isotopeName(base: baseServiceName, slug: slug, index: index)
+        let agreement = declaredClusterID ?? clusterID(slug: slug)
 
-        for port in mapping.values where port < 1 || port > 65_535 {
-            throw DeriveError.portOutOfRange(port)
-        }
-
-        // Second pass: rewrite.
+        // Second pass: rewrite state, rotate the isotope, turn discovery on and
+        // make sure every member announces the same agreement.
         var output: [String] = []
-        output.reserveCapacity(lines.count)
+        output.reserveCapacity(lines.count + 10)
         section = ""
         var seenRuntime = Set<String>()
+        var tunerAdvertiseWritten = false
+        var tunerTypeWritten = false
+        var clusterLineWritten = false
+        var insertedClusterLine = false
+
+        func flushTunerDefaults() {
+            if !tunerAdvertiseWritten {
+                output.append("  advertise: true")
+                tunerAdvertiseWritten = true
+            }
+            if !tunerTypeWritten {
+                output.append("  service_type: \"\(discoveryType)\"")
+                tunerTypeWritten = true
+            }
+        }
 
         for line in lines {
             if let name = topLevelName(line) {
+                // Leaving the tuner section: fill in anything it did not say.
+                if section == "tuner", name != "tuner" {
+                    flushTunerDefaults()
+                }
                 section = name
-            }
+                output.append(line)
 
-            if section == "runtime",
-               let key = keyName(line),
-               ["state_dir", "lock_file", "baseline_file"].contains(key) {
-                seenRuntime.insert(key)
-                output.append(runtimeLine(line, key: key, directory: instanceDirectory))
-                continue
-            }
-
-            if ["health", "auth", "hosted"].contains(section),
-               let address = listenAddress(line),
-               let port = address.port,
-               isLocalHost(address.host) {
-                if port == 0 {
-                    output.append(line)
-                } else if let mapped = mapping[port] {
-                    output.append(listenLine(line, port: mapped))
-                } else {
-                    output.append(line)
+                if name == "federation", !hasClusterLine {
+                    output.append("  # Added by lezz.sea: the agreement that makes peers trust each other.")
+                    output.append("  cluster_id: \"\(agreement)\"")
+                    insertedClusterLine = true
                 }
                 continue
             }
 
-            if section == "federation",
-               let key = keyName(line),
-               key == "base_port" || key == "max_port",
-               let value = intValue(line),
-               let mapped = mapping[value] {
-                output.append(replacingInt(line, old: value, new: mapped))
-                continue
+            switch section {
+            case "service":
+                if keyName(line) == "name" {
+                    output.append(replacingStringValue(line, with: isotope))
+                    continue
+                }
+            case "runtime":
+                if let key = keyName(line),
+                   ["state_dir", "lock_file", "baseline_file"].contains(key) {
+                    seenRuntime.insert(key)
+                    output.append(runtimeLine(line, key: key, directory: instanceDirectory))
+                    continue
+                }
+            case "tuner":
+                if keyName(line) == "advertise" {
+                    tunerAdvertiseWritten = true
+                    output.append(replacingScalar(line, with: "true"))
+                    continue
+                }
+                if keyName(line) == "service_type" {
+                    tunerTypeWritten = true
+                    output.append(replacingStringValue(line, with: discoveryType))
+                    continue
+                }
+            case "federation":
+                if keyName(line) == "cluster_id" {
+                    clusterLineWritten = true
+                    // An empty key is the sample's way of saying "no agreement
+                    // yet"; the launcher supplies it rather than adding a
+                    // duplicate key beside it.
+                    if stringValue(line) == nil {
+                        output.append(replacingStringValue(line, with: agreement))
+                        continue
+                    }
+                }
+            default:
+                break
             }
 
-            output.append(rewriteSelfReferences(line, mapping: mapping))
+            output.append(line)
+        }
+
+        // The last section never closes, so flush its defaults here.
+        if section == "tuner" {
+            flushTunerDefaults()
+        }
+        if section == "federation", !clusterLineWritten, !insertedClusterLine {
+            output.append("  cluster_id: \"\(agreement)\"")
         }
 
         for key in ["state_dir", "lock_file", "baseline_file"] where !seenRuntime.contains(key) {
             throw DeriveError.missingRuntimeKey(key)
         }
 
-        let ports = Set(mapping.values).sorted()
+        if !hasTuner {
+            output.append(contentsOf: [
+                "",
+                "# Added by lezz.sea: every instance advertises its own isotope name",
+                "# so mDNS can tell the members of a lab cluster apart.",
+                "tuner:",
+                "  enabled: true",
+                "  advertise: true",
+                "  service_type: \"\(discoveryType)\"",
+            ])
+        }
+
         return Derived(
             text: output.joined(separator: "\n"),
-            healthPort: health + offset,
-            ports: ports
+            isotope: isotope,
+            preferredHealthPort: health,
+            rootPort: hasFederation ? rootPort : nil,
+            clusterID: hasFederation ? agreement : nil
         )
     }
 
@@ -183,14 +273,50 @@ enum ScenarioConfig {
         return key
     }
 
-    private static func intValue(_ line: String) -> Int? {
+    private static func scalarValue(_ line: String) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard let colon = trimmed.firstIndex(of: ":") else { return nil }
         var value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         if let hash = value.firstIndex(of: "#") {
             value = String(value[..<hash]).trimmingCharacters(in: .whitespaces)
         }
-        return Int(value)
+        guard !value.isEmpty else { return nil }
+        return value
+    }
+
+    private static func stringValue(_ line: String) -> String? {
+        guard var value = scalarValue(line) else { return nil }
+        if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
+            value = String(value.dropFirst().dropLast())
+        }
+        return value.isEmpty ? nil : value
+    }
+
+    private static func intValue(_ line: String) -> Int? {
+        scalarValue(line).flatMap(Int.init)
+    }
+
+    /// Keeps the indentation, the key and any trailing comment.
+    private static func replacingScalar(_ line: String, with value: String) -> String {
+        let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+        let body = line.dropFirst(indent.count)
+        guard let colon = body.firstIndex(of: ":") else { return line }
+
+        // A comment starts at the first '#' that follows the colon. Key text
+        // never contains one, so splitting on the line's first '#' is safe for
+        // the scalar lines this rewrite touches.
+        let suffix: String
+        if let hash = body.firstIndex(of: "#") {
+            suffix = " " + String(body[hash...])
+        } else {
+            suffix = ""
+        }
+        let key = body[..<colon]
+        return "\(indent)\(key): \(value)\(suffix)"
+    }
+
+    private static func replacingStringValue(_ line: String, with value: String) -> String {
+        replacingScalar(line, with: "\"\(value)\"")
     }
 
     private struct Address {
@@ -220,19 +346,7 @@ enum ScenarioConfig {
         host.isEmpty || host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0"
     }
 
-    private static func listenLine(_ line: String, port: Int) -> String {
-        let indent = String(line.prefix { $0 == " " || $0 == "\t" })
-        let suffix: String
-        if let hash = line.firstIndex(of: "#") {
-            suffix = " " + String(line[hash...])
-        } else {
-            suffix = ""
-        }
-        return "\(indent)listen_addr: \"127.0.0.1:\(port)\"\(suffix)"
-    }
-
     private static func runtimeLine(_ line: String, key: String, directory: URL) -> String {
-        let indent = line.prefix { $0 == " " || $0 == "\t" }
         let value: URL
         switch key {
         case "state_dir":
@@ -242,26 +356,6 @@ enum ScenarioConfig {
         default:
             value = directory.appendingPathComponent("state/known-good.json")
         }
-        return "\(indent)\(key): \"\(value.path)\""
-    }
-
-    private static func rewriteSelfReferences(_ line: String, mapping: [Int: Int]) -> String {
-        var result = line
-        for (old, new) in mapping {
-            for host in ["localhost", "0.0.0.0", "127.0.0.1"] {
-                result = result.replacingOccurrences(
-                    of: "\(host):\(old)",
-                    with: "127.0.0.1:\(new)"
-                )
-            }
-        }
-        return result
-    }
-
-    private static func replacingInt(_ line: String, old: Int, new: Int) -> String {
-        guard let colon = line.firstIndex(of: ":") else { return line }
-        let start = line.index(after: colon)
-        guard let range = line.range(of: "\(old)", range: start..<line.endIndex) else { return line }
-        return line.replacingCharacters(in: range, with: "\(new)")
+        return replacingStringValue(line, with: value.path)
     }
 }
