@@ -32,6 +32,16 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("2")
 
+            Button("Isotopes") {
+                model.tab = .isotopes
+            }
+            .keyboardShortcut("3")
+
+            Button("Boundaries") {
+                model.tab = .boundaries
+            }
+            .keyboardShortcut("4")
+
             Divider()
 
             Toggle("Pause Events", isOn: pauseBinding)

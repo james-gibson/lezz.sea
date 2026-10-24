@@ -7,6 +7,10 @@ cluster: the lights it reports, and the MCP traffic it logs, live.
 
 ![Events](docs/events.png)
 
+![Isotopes](docs/isotopes.png)
+
+![Boundaries](docs/boundaries.png)
+
 ## What it does
 
 - **Lights.** Reads `adhd.lights.list` and `adhd.status` from the selected
@@ -15,13 +19,24 @@ cluster: the lights it reports, and the MCP traffic it logs, live.
 - **Events.** Follows adhd's JSONL MCP traffic log — one row per request,
   response, and light update, filterable and searchable, with the raw line on
   the context menu.
+- **Isotopes.** smoke-alarm's threat × mechanism matrix as a chart of the
+  nuclides: each threat class resolved into its variants, every mechanism a
+  decay channel with a daughter state, and every isotope carrying its exposure
+  fields — source term, pathway, dose, deterministic or stochastic effect.
+  Toggles to the plain grid. Needs no cluster. See
+  `smoke-alarm/docs/adr/0012-the-isotope-view-is-the-chart-of-the-nuclides.md`.
+- **Boundaries.** The invariants the rest of the app depends on, each with the
+  test that holds it and the failure it prevents. Two rows are conformance
+  gaps and are shown as debt, not as passes. Static, and needs no cluster.
+  See `smoke-alarm/docs/adr/0020-the-boundary-is-the-interface.md`.
 - **Discovery.** Checks the lezz cluster registry (`:19100/cluster`), probes the
   default adhd endpoint (`127.0.0.1:9090/mcp`), and watches Bonjour for
   `_adhd-isotope._tcp`.
 - **Drop targets.** Drop a `.jsonl` log to stream it. Drop a `.yaml` / `.json`
   config (an `mcp_server.addr`, or any URL ending `/mcp`) to add its cluster.
 - **Standard macOS chrome.** Menu commands, a Settings window, a search field,
-  a status bar, and the usual keyboard shortcuts.
+  a status bar, and the usual keyboard shortcuts. The panel switch lives in the
+  toolbar, so no control floats over the content.
 
 ## Build
 
@@ -38,12 +53,66 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
   -configuration Debug -destination 'platform=macOS' build
 ```
 
-Run the unit tests with:
+Run the unit and UI tests with:
 
 ```sh
 xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
   -destination 'platform=macOS' test
 ```
+
+The UI tests assert the two properties the shipped build broke: the window
+never shrinks below its floor, and the panel switch moves between panes. They
+also check that the lights table's rightmost column stays inside the window and
+that the isotope chart and boundary list render without a cluster.
+
+## Accessibility
+
+The app is built to pass an Accessibility Inspector audit rather than to look
+accessible in a screenshot.
+
+- **Status is never colour alone.** Green is a tick, red a stop sign, yellow a
+  warning triangle, dark a dotted ring. The same shapes appear in the summary
+  bar and the table, so the display survives colour blindness, Differentiate
+  Without Colour, Increase Contrast, and greyscale.
+- **Every control is named.** Toolbar buttons, the panel switch, the filter
+  segments, the pause and follow toggles, the status counts, cluster rows, and
+  each event row carry explicit labels. Decorative symbols are hidden from the
+  accessibility tree.
+- **The static panels are readable too.** Each isotope cell is a button with
+  its name, verdict, and channel count; each matrix cell names its mechanism and
+  verdict; each boundary row reads as one sentence, including the test that
+  holds it or the fact that it is a conformance gap.
+- **Chart and boundary layouts flex.** The isotope chart scrolls inside its
+  pane rather than demanding a fixed 720 points, and boundary rows move the
+  evidence chip below the invariant when the pane is narrow.
+- **State changes are spoken.** Connection changes, toasts, and a rejected
+  endpoint are announced through VoiceOver instead of appearing only as pixels.
+- **Reduce Motion is honoured.** The event list and the toast stop animating
+  when the system setting is on.
+- **The window has a floor.** 760 × 500 points. The summary bar drops its
+  secondary detail instead of colliding with itself, and the lights table
+  switches from six columns to four when the detail pane is narrow. See
+  `LayoutMetrics` in `LezzSea/Support/Presentation.swift`.
+
+## App Store readiness
+
+- **App Sandbox is on**, with `com.apple.security.network.client` (the adhd
+  endpoint, the registry, and Bonjour) and
+  `com.apple.security.files.user-selected.read-only` (the traffic log).
+- **The log choice survives relaunch.** Picking a log stores a
+  security-scoped bookmark; the next launch resolves it and starts the scope
+  before tailing the file. "Use Default Log" falls back to the open panel when
+  the default path is outside the sandbox's reach.
+- **Local network usage is declared** with `NSLocalNetworkUsageDescription` and
+  `NSBonjourServices`, so the macOS 15 local-network prompt explains itself.
+- **A privacy manifest** (`PrivacyInfo.xcprivacy`) declares the only
+  required-reason API the app touches — UserDefaults, reason `CA92.1` — and
+  states that nothing is tracked or collected.
+- `ITSAppUsesNonExemptEncryption` is `false`: the app implements no
+  cryptography, it only speaks HTTP/JSON to a cluster the user selected.
+
+See [docs/app-store.md](docs/app-store.md) for the review checklist and the
+items that can only be completed in App Store Connect.
 
 ## Publish a dev build
 
@@ -73,6 +142,8 @@ archives and exports rather than builds, and what CI verifies.
 | Discover clusters | ⇧⌘R |
 | Lights tab | ⌘1 |
 | Events tab | ⌘2 |
+| Isotopes tab | ⌘3 |
+| Boundaries tab | ⌘4 |
 | Pause the event stream | ⇧⌘P |
 | Clear events | ⌘K |
 | Settings | ⌘, |
@@ -80,7 +151,8 @@ archives and exports rather than builds, and what CI verifies.
 The event stream defaults to `~/Library/Logs/kb-adhd.jsonl`, the idle launchd
 agent's log (`scripts/adhd` in the vault). Use **File ▸ Open adhd Log…** or the
 Settings window to follow another instance's log — `spin.sh` instances write
-`~/Library/Logs/kb-adhd-<name>.jsonl`.
+`~/Library/Logs/kb-adhd-<name>.jsonl`. Under the sandbox the first choice grants
+access to that file; subsequent launches reuse the stored bookmark.
 
 ## Notes on the design
 
@@ -90,11 +162,23 @@ Settings window to follow another instance's log — `spin.sh` instances write
 - **The log is the live channel.** adhd's `/mcp` SSE stream carries server
   frames only; the JSONL log is where every request and response actually
   appears. Watching it is the honest live view.
-- **App Sandbox is off.** The app reads a log outside its container
-  (`~/Library/Logs`) and only talks to loopback. If you want to ship it through
-  the App Store, turn the sandbox on, add
-  `com.apple.security.network.client`, and keep the security-scoped bookmark
-  from the log picker.
+- **The isotope chart is static and pure.** `NuclideChart` is data plus
+  arithmetic, `NuclideChartView` is SwiftUI over it — no `AppModel`, no
+  network, no files, and no cluster. That is why it renders in the empty state
+  and why it would drop into a WidgetKit extension unchanged.
+- **The isotope chart is an exposure model.** The dosimetry vocabulary is
+  tracked rather than avoided — source term, pathway, dose, and deterministic
+  versus stochastic effect — with work as the source and accumulated 42i
+  distance as the dose. No ionizing radiation, no radiological quantity
+  (Bq, Gy, Sv), no safety function.
+- **The panel is not a `TabView`.** On macOS a `TabView` with `.tabItem` draws
+  its own strip over the content, which overlapped the summary bar. The panel is
+  a toolbar picker bound to `AppModel.tab` and the detail pane switches in
+  place.
+- **The table adapts by column, not by clipping.** `Table` pins columns at
+  their ideal widths, so a six-column table cannot fit the detail pane at the
+  window's floor. The view measures its width and renders a four-column table
+  there instead of letting the Updated column fall off the right edge.
 - **No third-party dependencies.**
 
 ## Layout
@@ -104,8 +188,13 @@ LezzSea/
   LezzSeaApp.swift          App, Window, Settings scenes
   AppModel.swift            selection, polling, discovery, log tail
   Models/CoreModels.swift   lights, status, clusters, traffic events
+  Models/NuclideChart.swift threat classes, isotopes, decay channels
+  Models/Boundaries.swift   invariants, the test that holds each, its failure
   Services/                 JSON-RPC client, file tail, Bonjour, URL normalising
-  Views/                    sidebar, dashboard, lights table, event stream, settings
+  Support/                  status naming, layout metrics, VoiceOver announcements
+  Views/                    sidebar, dashboard, lights, events, isotopes, boundaries, settings
+  LezzSea.entitlements      App Sandbox, network client, user-selected read
+  PrivacyInfo.xcprivacy     required-reason API declarations
 ```
 
 The measure behind the rung and the light colours is described in the vault:

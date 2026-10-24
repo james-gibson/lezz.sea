@@ -42,10 +42,35 @@ final class AppModel {
     enum Tab: String, CaseIterable, Identifiable {
         case lights
         case events
+        case isotopes
+        case boundaries
 
         var id: String { rawValue }
-        var title: String { self == .lights ? "Lights" : "Events" }
-        var symbol: String { self == .lights ? "circle.grid.2x2" : "waveform.path.ecg" }
+
+        var title: String {
+            switch self {
+            case .lights: "Lights"
+            case .events: "Events"
+            case .isotopes: "Isotopes"
+            case .boundaries: "Boundaries"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .lights: "circle.grid.2x2"
+            case .events: "waveform.path.ecg"
+            case .isotopes: "atom"
+            case .boundaries: "checkmark.shield"
+            }
+        }
+
+        /// Lights and events describe a cluster. The isotope chart and the
+        /// boundary list are static and must stay reachable with no cluster
+        /// running.
+        var needsCluster: Bool {
+            self == .lights || self == .events
+        }
     }
 
     // MARK: - Observable state
@@ -123,6 +148,12 @@ final class AppModel {
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
     @ObservationIgnored private var started = false
 
+    /// The URL whose security scope this process currently holds. The app is
+    /// sandboxed, so a log outside the container is only readable after the
+    /// user picks it; the scope is what keeps that permission alive for the
+    /// current run, and the bookmark is what survives the next launch.
+    @ObservationIgnored private var scopedURL: URL?
+
     private enum Key {
         static let refresh = "refreshInterval"
         static let maxEvents = "maxEvents"
@@ -132,6 +163,7 @@ final class AppModel {
         static let manual = "manualClusters"
         static let selected = "selectedCluster"
         static let logPath = "logPath"
+        static let logBookmark = "logBookmark"
     }
 
     static var defaultLogPath: String {
@@ -171,9 +203,7 @@ final class AppModel {
         guard !started else { return }
         started = true
 
-        if !FileManager.default.fileExists(atPath: logPath) {
-            logPath = Self.defaultLogPath
-        }
+        resolveStoredLog()
         startTail()
         bonjour.start()
 
@@ -384,14 +414,81 @@ final class AppModel {
     }
 
     func setLogURL(_ url: URL) {
+        adoptSecurityScope(for: url)
         logPath = url.path
         defaults.set(logPath, forKey: Key.logPath)
+
+        // Persist a security-scoped bookmark so a sandboxed relaunch can read
+        // the same file without asking again. Outside the sandbox the call
+        // throws and the stored path is used instead.
+        if let bookmark = try? url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            defaults.set(bookmark, forKey: Key.logBookmark)
+        } else {
+            defaults.removeObject(forKey: Key.logBookmark)
+        }
+
         startTail()
         toast = "Streaming \(url.lastPathComponent)"
     }
 
     func openDefaultLog() {
-        setLogURL(URL(fileURLWithPath: Self.defaultLogPath))
+        let url = URL(fileURLWithPath: Self.defaultLogPath)
+
+        // In the sandbox the default log is outside the container and is not
+        // readable until the user grants it. Sending them to the picker is the
+        // honest move; a silent "missing" state would look like a broken app.
+        if FileManager.default.isReadableFile(atPath: url.path) {
+            setLogURL(url)
+        } else {
+            chooseLog()
+        }
+    }
+
+    // MARK: - Log bookmarks
+
+    private func resolveStoredLog() {
+        if let data = defaults.data(forKey: Key.logBookmark) {
+            var stale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ) {
+                adoptSecurityScope(for: url)
+                logPath = url.path
+
+                if stale, let refreshed = try? url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                ) {
+                    defaults.set(refreshed, forKey: Key.logBookmark)
+                }
+                return
+            }
+            defaults.removeObject(forKey: Key.logBookmark)
+        }
+
+        if !FileManager.default.fileExists(atPath: logPath) {
+            logPath = Self.defaultLogPath
+        }
+    }
+
+    private func adoptSecurityScope(for url: URL) {
+        releaseSecurityScope()
+        if url.startAccessingSecurityScopedResource() {
+            scopedURL = url
+        }
+    }
+
+    private func releaseSecurityScope() {
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
     }
 
     func clearEvents() {

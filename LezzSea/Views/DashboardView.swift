@@ -9,49 +9,78 @@ struct DashboardView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var model = model
+        VStack(spacing: 0) {
+            // The cluster summary belongs to the cluster-scoped panels. The
+            // isotope chart and the boundary list are static, so they get the
+            // whole pane and never show a connection they do not use.
+            if model.selectedCluster != nil, model.tab.needsCluster {
+                LightSummaryBar()
 
-        Group {
-            if model.selectedCluster != nil {
-                VStack(spacing: 0) {
-                    LightSummaryBar()
-
-                    if case .offline(let message) = model.connection {
-                        OfflineBanner(message: message)
-                    }
-
-                    TabView(selection: $model.tab) {
-                        LightsView()
-                            .tabItem {
-                                Label(AppModel.Tab.lights.title, systemImage: AppModel.Tab.lights.symbol)
-                            }
-                            .tag(AppModel.Tab.lights)
-
-                        EventStreamView()
-                            .tabItem {
-                                Label(AppModel.Tab.events.title, systemImage: AppModel.Tab.events.symbol)
-                            }
-                            .tag(AppModel.Tab.events)
-                    }
-                    .padding(.top, 2)
+                if case .offline(let message) = model.connection {
+                    OfflineBanner(message: message)
                 }
-            } else {
-                ContentUnavailableView {
-                    Label("No Cluster", systemImage: "antenna.radiowaves.left.and.right")
-                } description: {
-                    Text("lezz.sea shows the lights of an available adhd cluster. Start one, let discovery find it, or add its MCP endpoint.")
-                } actions: {
-                    HStack {
-                        Button("Discover") {
-                            Task { await model.discover() }
-                        }
-                        Button("Add Cluster…") {
-                            model.isAddingCluster = true
-                        }
+            }
+
+            Group {
+                if model.tab.needsCluster, model.selectedCluster == nil {
+                    NoClusterView()
+                } else {
+                    // A plain switch, not a `TabView`. `TabView` + `.tabItem`
+                    // draws its own tab strip on top of the content on macOS,
+                    // which is what overlapped the summary bar and the table
+                    // header in the shipped build. The panel is chosen from
+                    // the toolbar instead (`ContentView`), so the detail pane
+                    // owns its whole frame.
+                    switch model.tab {
+                    case .lights:
+                        LightsView()
+                    case .events:
+                        EventStreamView()
+                    case .isotopes:
+                        NuclideChartView()
+                    case .boundaries:
+                        BoundariesView()
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(model.tab.title)
+            .accessibilityIdentifier("dashboard.panel")
         }
+    }
+}
+
+// MARK: - Empty state
+
+private struct NoClusterView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("No Cluster", systemImage: "antenna.radiowaves.left.and.right")
+        } description: {
+            Text("lezz.sea shows the lights of an available adhd cluster. Start one, let discovery find it, or add its MCP endpoint. The isotope chart and the boundary list need no cluster.")
+        } actions: {
+            HStack {
+                Button("Discover") {
+                    Task { await model.discover() }
+                }
+                .accessibilityIdentifier("empty.discover")
+
+                Button("Add Cluster…") {
+                    model.isAddingCluster = true
+                }
+                .accessibilityIdentifier("empty.addCluster")
+
+                Menu("Static Views") {
+                    Button("Isotopes") { model.tab = .isotopes }
+                    Button("Boundaries") { model.tab = .boundaries }
+                }
+                .accessibilityIdentifier("empty.staticViews")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -61,16 +90,32 @@ private struct LightSummaryBar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        // Two layouts, chosen by what actually fits. The full one carries the
+        // instance name and trust rung; the compact one drops them rather than
+        // letting the row push its own contents underneath each other.
+        ViewThatFits(in: .horizontal) {
+            full
+            compact
+        }
+        .font(.callout)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("summary.bar")
+    }
+
+    private var full: some View {
         HStack(spacing: 14) {
-            CountBadge(color: .green, label: "green", value: model.summary.green)
-            CountBadge(color: .red, label: "red", value: model.summary.red)
-            CountBadge(color: .yellow, label: "yellow", value: model.summary.yellow)
-            CountBadge(color: .secondary, label: "dark", value: model.summary.dark)
+            badges
 
             Divider().frame(height: 14)
 
-            Text("\(model.summary.total) light\(model.summary.total == 1 ? "" : "s")")
+            Text(CountText.lights(model.summary.total))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             Spacer(minLength: 8)
 
@@ -80,40 +125,61 @@ private struct LightSummaryBar: View {
                         .lineLimit(1)
                         .help("adhd instance")
                 }
+
                 if let rung = status.trustRung {
                     Text("rung \(rung)")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                         .help("Trust rung on the 42i capability lattice")
                 }
             }
         }
-        .font(.callout)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var compact: some View {
+        HStack(spacing: 12) {
+            badges
+            Text(CountText.lights(model.summary.total))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var badges: some View {
+        HStack(spacing: 14) {
+            CountBadge(status: "green", color: .green, label: "green", value: model.summary.green)
+            CountBadge(status: "red", color: .red, label: "red", value: model.summary.red)
+            CountBadge(status: "yellow", color: .yellow, label: "yellow", value: model.summary.yellow)
+            CountBadge(status: "dark", color: .secondary, label: "dark", value: model.summary.dark)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
 private struct CountBadge: View {
+    let status: String
     let color: Color
     let label: String
     let value: Int
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 9, height: 9)
+            Image(systemName: LightStatusStyle.symbol(for: status))
+                .foregroundStyle(color)
+                .imageScale(.small)
+                .accessibilityHidden(true)
+
             Text("\(value)")
                 .monospacedDigit()
                 .fontWeight(.medium)
+
             Text(label)
                 .foregroundStyle(.secondary)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(value) \(label) lights")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(CountText.count(value, label))
     }
 }
 
@@ -124,20 +190,28 @@ private struct OfflineBanner: View {
     let message: String
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "wifi.exclamationmark")
+                .accessibilityHidden(true)
+
             Text(message)
-                .lineLimit(1)
-            Spacer()
+                .lineLimit(2)
+
+            Spacer(minLength: 8)
+
             Button("Retry") {
                 Task { await model.refresh() }
             }
             .buttonStyle(.link)
+            .accessibilityIdentifier("banner.retry")
         }
         .font(.callout)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.yellow.opacity(0.14))
         .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Offline. \(message)")
     }
 }
