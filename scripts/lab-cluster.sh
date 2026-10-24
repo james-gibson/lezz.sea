@@ -27,6 +27,12 @@
 #               and dependency deliberately do not, and an empty value means
 #               self-trust is off.
 #
+# Each launch also writes `universe.json` beside the contract: the run as it was
+# observed at readiness and again at shutdown — root, members, the declared
+# agreement, bound ports, every member's `/status` and `/isotope/list`. The logs
+# and derived configs stay next to it, so a simulation run can be reconstructed
+# later rather than only remembered.
+#
 # Nothing is written to /tmp directly. Work happens in a mktemp directory under
 # the per-user $TMPDIR, so a lab run is not world-readable and does not leave a
 # predictable path behind.
@@ -110,11 +116,126 @@ slug_of() {
   printf '%s' "${base%.yaml}"
 }
 
+# ---------------------------------------------------------------- universe
+#
+# A universe is the run as it was observed: the root, the members, the agreement
+# the sample declared, the ports the members actually bound, each member's
+# status, and each member's isotope list with rungs. It is an observation, not a
+# claim — the logs and configs stay beside it so the run can be reconstructed
+# later. Every capture appends a phase, so readiness and shutdown are both kept.
+
+capture_universe() {
+  local cluster_json="$1" out="$2" root_port="$3" ports_csv="$4" phase="$5"
+  python3 - "$cluster_json" "$out" "$root_port" "$ports_csv" "$phase" <<'UNIVERSE_PY'
+import datetime, json, os, sys, urllib.request
+
+cluster_path, out, root_port, ports_csv, phase = sys.argv[1:6]
+cluster = json.load(open(cluster_path, encoding="utf-8"))
+ports = [int(p) for p in ports_csv.split(",") if p.strip().isdigit()]
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def fetch(url):
+    with urllib.request.urlopen(url, timeout=3) as response:
+        return json.load(response)
+
+universe = {}
+if os.path.exists(out):
+    with open(out, encoding="utf-8") as handle:
+        universe = json.load(handle)
+
+universe.update({
+    "schema": "lezz.sea/universe/v1",
+    "scenarioID": cluster.get("scenarioID"),
+    "slug": cluster.get("slug"),
+    "clusterID": cluster.get("clusterID"),
+    "rootPort": cluster.get("rootPort"),
+    "startedAt": cluster.get("startedAt"),
+    "adhd": cluster.get("adhd"),
+})
+universe.setdefault("phases", [])
+
+members = []
+for index, member in enumerate(cluster.get("members", [])):
+    entry = dict(member)
+    if index < len(ports):
+        entry["discoveredPort"] = ports[index]
+    else:
+        previous = next(
+            (m for m in universe.get("members", []) if m.get("isotope") == member.get("isotope")),
+            {},
+        )
+        if previous.get("discoveredPort"):
+            entry["discoveredPort"] = previous["discoveredPort"]
+    members.append(entry)
+universe["members"] = members
+
+observation = {"phase": phase, "at": now, "status": {}, "isotopes": {}, "membership": None}
+if root_port:
+    try:
+        observation["membership"] = fetch(f"http://127.0.0.1:{root_port}/membership")
+    except Exception as error:  # the run may already be gone; record that, do not fail
+        observation["membership"] = {"error": str(error)}
+
+for member in members:
+    port = member.get("discoveredPort")
+    if not port:
+        continue
+    isotope = member.get("isotope", "")
+    try:
+        observation["status"][isotope] = fetch(f"http://127.0.0.1:{port}/status")
+    except Exception as error:
+        observation["status"][isotope] = {"error": str(error)}
+    try:
+        observation["isotopes"][isotope] = fetch(f"http://127.0.0.1:{port}/isotope/list")
+    except Exception as error:
+        observation["isotopes"][isotope] = {"error": str(error)}
+
+universe["phases"].append(observation)
+
+tmp = out + ".tmp"
+with open(tmp, "w", encoding="utf-8") as handle:
+    json.dump(universe, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(tmp, out)
+UNIVERSE_PY
+}
+
+# universe_for prints the universe path for a cluster contract, or nothing.
+universe_for() {
+  local pointer="$1" candidate
+  candidate="$(dirname "$pointer")/universe.json"
+  [ -f "$candidate" ] && { printf '%s' "$candidate"; return; }
+  candidate=$(python3 - "$pointer" <<'UNIVERSE_PATH_PY'
+import json, os, sys
+try:
+    cluster = json.load(open(sys.argv[1]))
+    config = cluster.get("members", [{}])[0].get("configPath", "")
+    if config:
+        print(os.path.normpath(os.path.join(os.path.dirname(config), "..", "universe.json")))
+except Exception:
+    pass
+UNIVERSE_PATH_PY
+)
+  [ -n "$candidate" ] && [ -f "$candidate" ] && printf '%s' "$candidate"
+}
+
 # ---------------------------------------------------------------- stop
 
 stop_cluster() {
   local slug="$1" pointer="$2"
   [ -f "$pointer" ] || fail "no cluster.json for $slug at $pointer"
+
+  # Capture what is still observable, from the ports the readiness phase
+  # recorded: a stop is part of the run, and a universe without its shutdown is
+  # missing the transition that matters.
+  local universe root ports
+  universe=$(universe_for "$pointer")
+  if [ -n "$universe" ]; then
+    root=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("rootPort") or "")' "$universe")
+    ports=$(python3 -c 'import json,sys; print(",".join(str(m.get("discoveredPort") or "") for m in json.load(open(sys.argv[1])).get("members", [])))' "$universe")
+    capture_universe "$pointer" "$universe" "$root" "$ports" stop
+    say "universe: $universe"
+  fi
 
   local stopped=0
   while IFS=$'\t' read -r pid_path isotope; do
@@ -612,6 +733,10 @@ if [ -n "$ROOT_PORT" ]; then
       done)
   say "federation root: http://127.0.0.1:$ROOT_PORT/membership"
 fi
+
+capture_universe "$WORK/$SLUG/cluster.json" "$WORK/$SLUG/universe.json" \
+  "$ROOT_PORT" "$(IFS=,; echo "${HEALTH_PORTS[*]}")" readiness
+say "universe: $WORK/$SLUG/universe.json"
 
 # ---------------------------------------------------------------- adhd
 

@@ -56,7 +56,11 @@ absolute path when the checkout is elsewhere. It:
 5. writes `cluster.json` into the work directory **and** into
    `~/Library/Application Support/LezzSea/Clusters/<slug>/cluster.json`, which
    is what the Lab build reads;
-6. with `--pair-adhd`, writes an adhd config watching every member, starts adhd
+6. writes `universe.json` next to the contract: the observed root, members,
+   declared agreement, bound ports, and every member's `/status` and
+   `/isotope/list`, as a `readiness` phase (and a `stop` phase when the run is
+   stopped);
+7. with `--pair-adhd`, writes an adhd config watching every member, starts adhd
    headless on a free port, and prints the endpoint.
 
 Success looks like:
@@ -94,6 +98,16 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
 
 The adhd endpoint printed by `--pair-adhd` is what you add to the dashboard (or
 set as `defaultEndpoint` in the app's defaults) to see lights and events.
+
+## What a universe is
+
+`universe.json` is the run as observed, not as claimed: `schema:
+lezz.sea/universe/v1`, the cluster's identity and declared agreement, each
+member with its bound port and file paths, and one entry per capture phase
+holding that moment's `/membership`, `/status` and `/isotope/list`. It is the
+artifact a later construction reads; the logs and derived configs sit beside it
+in the same work directory. A run with no declared agreement records empty
+isotope lists — that is the observation the pool sample intends.
 
 ## Stop it
 
