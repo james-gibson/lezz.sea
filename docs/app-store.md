@@ -51,8 +51,8 @@ distribution channel.
 
 The app is a viewer for a developer-run service (`adhd`) that listens on
 loopback or the lab LAN. With no cluster running, the app shows its empty
-state and stays fully navigable; the isotope chart and the boundary list are
-static and need no service at all, so they can be exercised on a clean Mac.
-The traffic-log reader is optional; the app opens an `NSOpenPanel` and
-persists a security-scoped bookmark for the file the reviewer chooses. No
-login, purchase, or account is required.
+state and stays fully navigable; the isotope chart, the boundary list and the
+scenario catalog are static and need no service at all, so they can be
+exercised on a clean Mac. The traffic-log reader is optional; the app opens an
+`NSOpenPanel` and persists a security-scoped bookmark for the file the reviewer
+chooses. No login, purchase, or account is required.

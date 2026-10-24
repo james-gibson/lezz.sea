@@ -3,6 +3,7 @@
 //  LezzSeaUITests
 //
 
+import AppKit
 import XCTest
 
 /// Two properties the shipped build broke, kept honest here:
@@ -85,6 +86,60 @@ final class LezzSeaUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["boundary.residence"].exists,
             "the boundary rows did not render"
+        )
+    }
+
+    /// The scenario catalog is the selection surface for smoke-alarm's
+    /// ready-to-run configs. It has to render with no cluster, and the filter
+    /// has to narrow the list rather than merely highlight it.
+    @MainActor
+    func testScenariosPanelFiltersTheCatalog() throws {
+        let app = launchApp()
+
+        let picker = app.radioGroups["toolbar.panel"]
+        guard picker.waitForExistence(timeout: 5) else {
+            throw XCTSkip("This build does not expose the toolbar panel picker")
+        }
+
+        let scenarios = picker.radioButtons["Scenarios"]
+        XCTAssertTrue(scenarios.exists, "Scenarios segment is missing or unnamed")
+
+        scenarios.click()
+        XCTAssertEqual(picker.value as? String, "Scenarios")
+        XCTAssertTrue(
+            app.staticTexts["Scenarios"].firstMatch.waitForExistence(timeout: 5),
+            "the scenario catalog did not render"
+        )
+
+        // The first section is transport, so this row is on screen without
+        // scrolling; a lazily-built List does not expose off-screen rows.
+        XCTAssertTrue(
+            app.descendants(matching: .any)["scenario.stdio-mcp-strict.yaml"].exists,
+            "the scenario rows did not render"
+        )
+
+        // The action is the point of the panel: copy the documented command.
+        let copy = app.buttons["Copy the command for Strict stdio MCP"]
+        XCTAssertTrue(copy.exists, "the copy button is missing")
+        copy.click()
+        XCTAssertEqual(
+            NSPasteboard.general.string(forType: .string),
+            "go run ./cmd/ocd-smoke-alarm serve --config=configs/samples/stdio-mcp-strict.yaml --mode=foreground",
+            "the copied command is not the documented one"
+        )
+
+        let search = app.textFields["scenarios.search"]
+        XCTAssertTrue(search.exists, "the scenario filter is missing")
+        search.click()
+        search.typeText("oauth")
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["scenario.oauth-mock-allow.yaml"].waitForExistence(timeout: 5),
+            "the filter did not keep the OAuth scenarios"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["scenario.stdio-mcp-strict.yaml"].exists,
+            "the filter did not remove the stdio scenario"
         )
     }
 

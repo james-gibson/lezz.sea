@@ -84,6 +84,11 @@ enum LayoutMetrics {
     static let preferredWindowWidth: CGFloat = 1_120
     static let preferredWindowHeight: CGFloat = 720
 
+    /// The custom status bar is a bottom safe-area inset. Scroll views in the
+    /// detail column consume it; a plain `VStack` does not, so a pinned footer
+    /// pads by this much to stay above the bar instead of under it.
+    static let statusBarHeight: CGFloat = 30
+
     static var minimumWindowSize: CGSize {
         CGSize(width: minimumWindowWidth, height: minimumWindowHeight)
     }

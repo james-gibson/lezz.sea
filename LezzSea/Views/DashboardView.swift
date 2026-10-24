@@ -40,6 +40,8 @@ struct DashboardView: View {
                         NuclideChartView()
                     case .boundaries:
                         BoundariesView()
+                    case .scenarios:
+                        ScenariosView()
                     }
                 }
             }
@@ -76,6 +78,7 @@ private struct NoClusterView: View {
                 Menu("Static Views") {
                     Button("Isotopes") { model.tab = .isotopes }
                     Button("Boundaries") { model.tab = .boundaries }
+                    Button("Scenarios") { model.tab = .scenarios }
                 }
                 .accessibilityIdentifier("empty.staticViews")
             }
