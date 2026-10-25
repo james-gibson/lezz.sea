@@ -111,6 +111,24 @@ absolute state paths. `LezzSeaUITests/LabClusterUITests.swift` checks a
 script-launched cluster against the Lab build; run it after
 `scripts/lab-cluster.sh` (the command is in `docs/scenarios.md`).
 
+## Isotope tests
+
+LezzSea is the observation layer; the KB cluster is the subject. The live
+security scans are its isotope tests: empty gate/proxy, read/write/exec keys,
+rung negotiation, inverse proxy rotation, honeypot and event. Run them from the
+CLI:
+
+```sh
+scripts/isotope-tests.sh
+```
+
+It validates every feature against the isotope canon, runs the scans, and writes
+the stable `lezzsea.isotope-tests/v1` manifest to
+`build/isotope-tests.json`. See [docs/isotope-tests.md](docs/isotope-tests.md).
+
+The **Isotopes** panel above is different: it is smoke-alarm's static
+threat × mechanism chart and needs no cluster.
+
 ## Accessibility
 
 The app is built to pass an Accessibility Inspector audit rather than to look

@@ -37,7 +37,11 @@ struct DashboardView: View {
                     case .events:
                         EventStreamView()
                     case .isotopes:
-                        NuclideChartView()
+                        VStack(spacing: 0) {
+                            NuclideChartView()
+                            Divider()
+                            IsotopeTestsSection()
+                        }
                     case .boundaries:
                         BoundariesView()
                     case .scenarios:
