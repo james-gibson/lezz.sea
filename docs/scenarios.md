@@ -20,9 +20,13 @@ catalog comes first.
   lezz run ocd-smoke-alarm serve --config=configs/samples/<file> --mode=foreground
   ```
 
-- Copies the adhd `smoke_alarm` block that pairs adhd with that instance.
+- Copies the adhd `smoke_alarm` block that pairs adhd with that instance — one
+  entry per member of the cluster when it is running.
 - Links each row to the YAML at the commit the catalog was transcribed from.
-- In the **Lab build**, launches and stops the scenario (below).
+- In the **Lab build**, launches and stops a single-process scenario (below).
+- Shows any cluster described by `cluster.json`, including one a script
+  started. That is deliberate: the UI is verified against a cluster it did not
+  launch before it is trusted to launch multi-process clusters itself.
 
 It is static. It needs no cluster, no network, no smoke-alarm checkout, and no
 file access, which is why it also renders in the empty state and inside the App
@@ -35,14 +39,17 @@ adhd watches a smoke-alarm through its `smoke_alarm` list
 
 ```yaml
 smoke_alarm:
-  - name: "federation-mesh"
+  - name: "federation-mesh-1"
     endpoint: "http://127.0.0.1:18088"
+    interval: 10s
+  - name: "federation-mesh-2"
+    endpoint: "http://127.0.0.1:18089"
     interval: 10s
 ```
 
-The row copies this block with the sample's health port — or the running
-instance's remapped port, when one is live. adhd appends `/status` to the
-endpoint.
+The row copies this block with the ports the members actually bound. adhd
+appends `/status` to each endpoint, so a federation cluster stays visible to
+adhd as more than its leader.
 
 For traceability, adhd's `features.binaries[].gherkin_files` points at the
 smoke-alarm feature files. `internal/report/scanner.go` then cross-references
@@ -70,35 +77,121 @@ build, which has no App Sandbox. The sandboxed build copies commands instead.
 The Lab launcher:
 
 1. Reads the selected sample.
-2. Derives a config:
-   - `runtime.state_dir`, `lock_file` and `baseline_file` become absolute
-     under `Application Support/LezzSea/Instances/<slug>-<offset>/`.
-   - The health, auth, hosted and federation ports move by a per-instance
-     offset, and self-references to those exact ports are rewritten.
-3. Runs `lezz run ocd-smoke-alarm serve --config=<derived> --mode=headless`.
-4. Polls `http://127.0.0.1:<health-port>/status` and shows running/unreachable.
-5. Stops it with `lezz run ocd-smoke-alarm ops stop -pid-file <pid>`.
+2. Derives a config per member (see below).
+3. Writes `cluster.json` before starting anything, so a failed launch is still
+   stoppable.
+4. Runs `lezz run ocd-smoke-alarm serve --config=<derived> --mode=headless`
+   once per member.
+5. Asks the federation root `<base_port>/membership` whether the cluster is
+   whole, and finds the health port each member bound by scanning loopback
+   upward from the preferred port and accepting a port only when `/status`
+   names that member's isotope. The mDNS advertisement is used when it answers;
+   loopback does not depend on the local-network permission mDNS needs.
+6. Stops it with `lezz run ocd-smoke-alarm ops stop -pid-file <pid>` per member.
 
-### Ports, not `127.0.0.N`
+### Ports are not moved; identity is rotated
 
-macOS only puts `127.0.0.1` on `lo0`. Binding `127.0.0.2` fails with
-`EADDRNOTAVAIL` until someone adds an alias as root (`ifconfig lo0 alias …`).
-The port offset gives the same isolation without touching the system network
-configuration. It was verified with two scenarios running at once on
-`127.0.0.1`.
+A port is not how two instances are told apart. The alarm already negotiates:
+
+- `health` binds its preferred port and scans upward on `EADDRINUSE`, then
+  advertises the port it actually bound over mDNS;
+- `federation` claims the first free slot in its range, so the first process
+  becomes the introducer and the rest become followers that announce at the
+  root (`http://localhost:<base_port>`).
+
+The derived config therefore leaves every listener and slot port alone, and
+changes four things instead:
+
+| change | why |
+| --- | --- |
+| `service.name` becomes `<name>-<slug>-<n>` | it is the mDNS instance name, so three members need three names |
+| `tuner.advertise: true` + `_smoke-alarm._tcp` | the advertisement carries the bound port for adhd, Tuner and any other consumer |
+| `federation.cluster_id` kept only when the sample declares one | peers do not trust each other by default; a declared agreement is what mirrors members into each other's isotope lists at the peer-certified rung. The launcher never invents one and never fills an empty one, because pool, chain, star and dependency deliberately omit it |
+| `runtime.*` paths become absolute and per-member | two members must not share a lock file or a baseline |
+
+Nothing else is edited, and the sample is never modified: each launch writes
+derived configs under
+`Application Support/LezzSea/Clusters/<slug>/member-<n>/`.
+
+### `cluster.json` is the contract
+
+The launcher writes one file per scenario:
+
+```json
+{
+  "scenarioID": "federation-mesh.yaml",
+  "name": "Federation mesh",
+  "slug": "federation-mesh",
+  "clusterID": "federation-mesh-sample",
+  "rootPort": 5100,
+  "startedAt": "2026-10-24T05:27:46Z",
+  "members": [
+    {
+      "index": 1,
+      "isotope": "ocd-smoke-alarm-federation-mesh-1",
+      "preferredHealthPort": 18088,
+      "configPath": "/…/member-1/config.yaml",
+      "pidPath": "/…/member-1/ocd-smoke-alarm.pid",
+      "logPath": "/…/member-1/alarm.log",
+      "stateDir": "/…/member-1/state"
+    }
+  ]
+}
+```
+
+Anything that can write it can hand the UI a cluster, and the app treats that
+cluster exactly like one it started. The verification script uses this: it
+launches a cluster from outside the app, registers the same file, and the
+Scenarios panel shows it.
+
+The app shows a cluster as **running** only when the root names every member.
+When the cluster carries a declared agreement, the members must also share it;
+some members but not all is **partial**, and a root whose agreement differs is
+**unreachable** — the port belongs to somebody else's stack.
+
+That distinction is load-bearing. `cluster_id` is the sample's statement that
+its members may trust each other *by construction*: mesh declares one, while
+pool, chain, star and dependency do not. A sample that omits it still forms a
+federation (the first process is the introducer, the rest follow) but nobody is
+mirrored at the peer-certified rung, so a pool of identical workers does not
+trust itself merely by sharing a pool. An empty value means the same thing
+(`federation-mesh.yaml`: "Leave empty to disable self-trust").
+
+### Multi-process clusters are launched by the script, for now
+
+`federation-mesh.yaml` documents a three-process cluster. The app's row shows a
+terminal button that copies the script command rather than a play button: the
+launcher's discovery was verified against a script-launched cluster first, and
+extending the launch button to N members is the next step.
+
+```sh
+scripts/lab-cluster.sh configs/samples/federation-mesh.yaml --pair-adhd
+scripts/lab-cluster.sh --stop federation-mesh
+```
+
+The script:
+
+- works in a `mktemp -d` directory under the per-user `$TMPDIR`, not `/tmp`, so
+  a lab run is private and leaves no predictable path;
+- derives the same configs the app does (same four changes);
+- waits for self-negotiation, resolves each member's bound health port (mDNS
+  first, then a name-checked loopback scan) and reports which channel answered,
+  and verifies the root's membership plus every member's isotope list at rung 4;
+- optionally writes an adhd config watching every member, starts it headless on
+  a free port, and prints the endpoint to connect the UI to;
+- registers `cluster.json` so the Scenarios panel shows the cluster.
 
 ### Caveats
 
-- The offset is per live instance, in steps of 1000. A port held by something
-  outside the app surfaces as an unreachable instance; stop it and relaunch to
-  take the next slot.
-- Multi-instance federation scenarios (mesh, chain, pool) still need peer
-  addresses mapped across instances. The single-instance rewrite points them at
-  the instance's own offset. That is the next launcher step.
+- A port can still be lost to a process that is not an alarm: the health server
+  scans upward, but `auth`, `hosted` and the OAuth mock redirect server do not.
+  A sample that needs one of those shows up as an unreachable member, and its
+  `member-<n>/alarm.log` says which port failed.
 - `npx`/`uvx` targets need a useful PATH; the launcher prepends
   `/opt/homebrew/bin` and `/usr/local/bin`.
-- adhd pairing is copied, not written into a config or launched. The report
-  row from `scanner.go` is not shown yet.
+- adhd pairing is copied by the app and launched by the script; the app does not
+  write an adhd config or launch adhd yet, and the `scanner.go` report row is
+  not shown.
 
 ## What is deliberately not here
 
@@ -114,14 +207,32 @@ configuration. It was verified with two scenarios running at once on
 
 `ScenarioCatalog.sourceCommit` and `sourceDate` in
 `LezzSea/Models/Scenarios.swift` record where the entries came from. Each
-scenario also carries the health port used by the adhd block. When a sample
-changes:
+scenario also carries the health port used by the adhd block and, when the
+sample documents one, its process count. When a sample changes:
 
-1. Update the entry's name, use case, note or health port.
+1. Update the entry's name, use case, note, health port or process count.
 2. Update `sourceCommit`/`sourceDate`.
 3. Run the unit tests: they pin the count, unique files and names, the theme
    coverage, the shape of every command, URL and adhd block, the filter
-   semantics, and the derived config's port/path rewrite.
+   semantics, and the derived config's isotope/state/agreement rewrite.
 
 The YAML remains the source of truth. If the catalog and a config disagree, the
 config is right.
+
+## Verifying the UI against a cluster it did not launch
+
+```sh
+scripts/lab-cluster.sh configs/samples/federation-mesh.yaml --pair-adhd
+
+xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
+  -destination 'platform=macOS' \
+  CODE_SIGN_ENTITLEMENTS=LezzSea/LezzSea-Lab.entitlements \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS=LAB_LAUNCHER \
+  ENABLE_APP_SANDBOX=NO ENABLE_USER_SELECTED_FILES= \
+  test -only-testing:LezzSeaUITests/LabClusterUITests
+```
+
+The first test asserts that the Scenarios row reads `:5100 · 3/3` from the
+script's cluster. The second launches a single-process scenario through the
+app, waits for the bound port, and stops it. Both skip in the sandboxed build,
+which cannot see launcher clusters.

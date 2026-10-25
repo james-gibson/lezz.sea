@@ -50,24 +50,27 @@ struct ScenariosView: View {
                     ForEach(groups) { group in
                         Section {
                             ForEach(group.scenarios) { scenario in
-                                let instance = lab.instance(for: scenario)
+                                let cluster = lab.cluster(for: scenario)
                                 ScenarioRow(
                                     scenario: scenario,
-                                    instance: instance,
-                                    state: instance.flatMap { lab.states[$0.id] },
+                                    cluster: cluster,
+                                    state: lab.state(for: scenario),
+                                    membersUp: lab.membersUp(for: scenario),
+                                    port: cluster?.members.first.flatMap { lab.port(for: $0) },
                                     busy: lab.busy.contains(scenario.id)
-                                        || (instance.map { lab.busy.contains($0.id) } ?? false),
+                                        || (cluster.map { lab.busy.contains($0.id) } ?? false),
                                     copied: copied == scenario.id,
-                                    onCopy: { copy(scenario, instance: instance) },
-                                    onCopyADHD: { copyADHD(scenario, instance: instance) },
+                                    onCopy: { copy(scenario, cluster: cluster) },
+                                    onCopyScript: { copyScript(scenario) },
+                                    onCopyADHD: { copyADHD(scenario, cluster: cluster) },
                                     onLaunch: { Task { await lab.launch(scenario) } },
                                     onStop: {
-                                        if let instance {
-                                            Task { await lab.stop(instance) }
+                                        if let cluster {
+                                            Task { await lab.stop(cluster) }
                                         }
                                     },
                                     onReveal: {
-                                        if let instance { lab.reveal(instance) }
+                                        if let cluster { lab.reveal(cluster) }
                                     },
                                     onOpen: { NSWorkspace.shared.open(scenario.url) }
                                 )
@@ -114,7 +117,7 @@ struct ScenariosView: View {
             }
 
             #if LAB_LAUNCHER
-            Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Launching derives a config with absolute state and remapped ports, then runs the alarm headless; the YAML is the source of truth.")
+            Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Launching derives a config with absolute state, rotates the isotope for mDNS and runs the alarm headless; ports are left to self-negotiate. The YAML is the source of truth.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             #else
@@ -199,7 +202,7 @@ struct ScenariosView: View {
                 .foregroundStyle(.secondary)
 
             #if LAB_LAUNCHER
-            Text("Launching runs the alarm headless on 127.0.0.1 with remapped ports; macOS will not bind 127.0.0.N without an alias.")
+            Text("Launching runs the alarm headless on 127.0.0.1. Members keep the sample’s ports: the first process takes the federation slot and the health port, the rest self-negotiate, and the isotope name is what mDNS uses to tell them apart.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             #else
@@ -216,10 +219,13 @@ struct ScenariosView: View {
 
     // MARK: - Actions
 
-    private func copy(_ scenario: ScenarioCatalog.Scenario, instance: ScenarioLab.Instance?) {
+    private func copy(_ scenario: ScenarioCatalog.Scenario, cluster: LabCluster?) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(instance?.launchCommand ?? scenario.command, forType: .string)
+        pasteboard.setString(
+            cluster?.launchCommand ?? scenario.command,
+            forType: .string
+        )
 
         copied = scenario.id
         AccessibilityAnnouncer.announce("lezz command for \(scenario.name) copied.")
@@ -232,11 +238,23 @@ struct ScenariosView: View {
         }
     }
 
-    private func copyADHD(_ scenario: ScenarioCatalog.Scenario, instance: ScenarioLab.Instance?) {
+    private func copyScript(_ scenario: ScenarioCatalog.Scenario) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(
-            scenario.adhdSmokeAlarmBlock(healthPort: instance?.healthPort),
+            "scripts/lab-cluster.sh configs/samples/\(scenario.file)",
+            forType: .string
+        )
+        AccessibilityAnnouncer.announce("Lab cluster command for \(scenario.name) copied.")
+    }
+
+    private func copyADHD(_ scenario: ScenarioCatalog.Scenario, cluster: LabCluster?) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        let ports = cluster == nil ? [] : lab.healthPorts(for: scenario)
+        pasteboard.setString(
+            scenario.adhdSmokeAlarmBlock(healthPorts: ports),
             forType: .string
         )
 
@@ -276,11 +294,14 @@ private struct ThemeHeader: View {
 
 private struct ScenarioRow: View {
     let scenario: ScenarioCatalog.Scenario
-    let instance: ScenarioLab.Instance?
+    let cluster: LabCluster?
     let state: ScenarioLab.RunState?
+    let membersUp: Int?
+    let port: Int?
     let busy: Bool
     let copied: Bool
     let onCopy: () -> Void
+    let onCopyScript: () -> Void
     let onCopyADHD: () -> Void
     let onLaunch: () -> Void
     let onStop: () -> Void
@@ -288,7 +309,7 @@ private struct ScenarioRow: View {
     let onOpen: () -> Void
 
     private var command: String {
-        instance?.launchCommand ?? scenario.command
+        cluster?.members.first?.launchCommand ?? scenario.command
     }
 
     var body: some View {
@@ -300,31 +321,46 @@ private struct ScenarioRow: View {
 
                 Spacer(minLength: 8)
 
-                #if LAB_LAUNCHER
                 if busy {
                     ProgressView()
                         .controlSize(.mini)
                         .accessibilityLabel("Working on \(scenario.name)")
-                } else if let state {
-                    StateBadge(state: state, instance: instance)
+                } else if let state, let cluster {
+                    StateBadge(state: state, cluster: cluster, membersUp: membersUp, port: port)
                 }
 
-                if instance == nil {
-                    Button(action: onLaunch) {
-                        Image(systemName: "play.fill")
+                #if LAB_LAUNCHER
+                if cluster == nil {
+                    if scenario.isLaunchable {
+                        Button(action: onLaunch) {
+                            Image(systemName: "play.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help("Launch this scenario via lezz")
+                        .accessibilityLabel("Launch \(scenario.name) via lezz")
+                        .disabled(busy)
+                    } else {
+                        // A multi-process cluster is launched by the script
+                        // until the launcher's discovery is verified against
+                        // one, so the row offers the command, not a button
+                        // that would start an incomplete cluster.
+                        Button(action: onCopyScript) {
+                            Image(systemName: "terminal")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help("Copy the lab script command for this cluster")
+                        .accessibilityLabel("Copy the lab cluster command for \(scenario.name)")
+                        .disabled(busy)
                     }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("Launch this scenario via lezz")
-                    .accessibilityLabel("Launch \(scenario.name) via lezz")
-                    .disabled(busy)
                 } else {
                     Button(action: onStop) {
                         Image(systemName: "stop.fill")
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help("Stop this instance")
+                    .help("Stop this cluster")
                     .accessibilityLabel("Stop \(scenario.name)")
                     .disabled(busy)
                 }
@@ -343,8 +379,12 @@ private struct ScenarioRow: View {
 
                 Menu {
                     #if LAB_LAUNCHER
-                    if instance != nil {
-                        Button("Reveal config") { onReveal() }
+                    if cluster != nil {
+                        Button("Reveal cluster directory") { onReveal() }
+                        Divider()
+                    }
+                    if !scenario.isLaunchable {
+                        Button("Copy lab cluster command") { onCopyScript() }
                         Divider()
                     }
                     #endif
@@ -399,7 +439,9 @@ private struct ScenarioRow: View {
 
 private struct StateBadge: View {
     let state: ScenarioLab.RunState
-    let instance: ScenarioLab.Instance?
+    let cluster: LabCluster
+    let membersUp: Int?
+    let port: Int?
 
     var body: some View {
         HStack(spacing: 4) {
@@ -412,27 +454,42 @@ private struct StateBadge: View {
         .foregroundStyle(tint)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
+        .accessibilityIdentifier("cluster.state.\(cluster.slug)")
     }
 
     private var symbol: String {
         switch state {
         case .starting: "clock"
         case .running: "play.circle.fill"
+        case .partial: "circle.lefthalf.filled"
         case .unreachable: "exclamationmark.triangle.fill"
         }
     }
 
     private var label: String {
-        if state == .running, let port = instance?.healthPort {
-            return ":\(port)"
+        switch state {
+        case .starting, .unreachable:
+            return state.label
+        case .running, .partial:
+            let counts = "\(membersUp ?? cluster.members.count)/\(cluster.members.count)"
+            if let root = cluster.rootLabel {
+                return "\(root) · \(counts)"
+            }
+            return "(portText)"
         }
-        return state.label
+    }
+
+    /// A single-process sample has no root, so the badge names the port the
+    /// alarm actually bound.
+    private var portText: String {
+        port.map { ":\($0)" } ?? state.label
     }
 
     private var tint: Color {
         switch state {
         case .starting: .secondary
         case .running: .green
+        case .partial: .orange
         case .unreachable: .orange
         }
     }
@@ -441,8 +498,14 @@ private struct StateBadge: View {
         switch state {
         case .starting:
             "Starting"
+        case .running where cluster.rootPort != nil:
+            "Running, \(membersUp ?? cluster.members.count) of \(cluster.members.count) members, root port \(cluster.rootPort ?? 0)"
+        case .partial where cluster.rootPort != nil:
+            "Partial, \(membersUp ?? 0) of \(cluster.members.count) members, root port \(cluster.rootPort ?? 0)"
         case .running:
-            "Running on port \(instance?.healthPort ?? 0)"
+            "Running on port \(port ?? 0)"
+        case .partial:
+            "Partial: some members are unreachable"
         case .unreachable:
             "Unreachable"
         }
