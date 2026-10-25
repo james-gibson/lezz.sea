@@ -93,6 +93,24 @@ that the isotope chart and boundary list render without a cluster, and that the
 scenario filter narrows the catalog and both clipboard payloads are exact. The
 unit tests also pin the derived config's port remap and absolute state paths.
 
+## Isotope tests
+
+LezzSea is the observation layer; the KB cluster is the subject. The live
+security scans are its isotope tests: empty gate/proxy, read/write/exec keys,
+rung negotiation, inverse proxy rotation, honeypot and event. Run them from the
+CLI:
+
+```sh
+scripts/isotope-tests.sh
+```
+
+It validates every feature against the isotope canon, runs the scans, and writes
+the stable `lezzsea.isotope-tests/v1` manifest to
+`build/isotope-tests.json`. See [docs/isotope-tests.md](docs/isotope-tests.md).
+
+The **Isotopes** panel above is different: it is smoke-alarm's static
+threat × mechanism chart and needs no cluster.
+
 ## Accessibility
 
 The app is built to pass an Accessibility Inspector audit rather than to look
