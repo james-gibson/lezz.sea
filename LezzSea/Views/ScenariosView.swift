@@ -57,6 +57,7 @@ struct ScenariosView: View {
                                     state: lab.state(for: scenario),
                                     membersUp: lab.membersUp(for: scenario),
                                     port: cluster?.members.first.flatMap { lab.port(for: $0) },
+                                    adhdSummary: cluster.flatMap { lab.adhdSummary(for: $0) },
                                     busy: lab.busy.contains(scenario.id)
                                         || (cluster.map { lab.busy.contains($0.id) } ?? false),
                                     copied: copied == scenario.id,
@@ -71,6 +72,9 @@ struct ScenariosView: View {
                                     },
                                     onReveal: {
                                         if let cluster { lab.reveal(cluster) }
+                                    },
+                                    onRevealADHD: {
+                                        if let cluster { lab.revealADHD(cluster) }
                                     },
                                     onOpen: { NSWorkspace.shared.open(scenario.url) }
                                 )
@@ -298,6 +302,7 @@ private struct ScenarioRow: View {
     let state: ScenarioLab.RunState?
     let membersUp: Int?
     let port: Int?
+    let adhdSummary: String?
     let busy: Bool
     let copied: Bool
     let onCopy: () -> Void
@@ -306,6 +311,7 @@ private struct ScenarioRow: View {
     let onLaunch: () -> Void
     let onStop: () -> Void
     let onReveal: () -> Void
+    let onRevealADHD: () -> Void
     let onOpen: () -> Void
 
     private var command: String {
@@ -381,6 +387,9 @@ private struct ScenarioRow: View {
                     #if LAB_LAUNCHER
                     if cluster != nil {
                         Button("Reveal cluster directory") { onReveal() }
+                        if cluster?.adhd != nil {
+                            Button("Reveal adhd log") { onRevealADHD() }
+                        }
                         Divider()
                     }
                     if !scenario.isLaunchable {
@@ -417,6 +426,19 @@ private struct ScenarioRow: View {
                 Text("Note: \(note)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+
+            // The pairing is a fact about the running cluster, not the sample:
+            // it names the adhd endpoint that is watching these members.
+            if let adhdSummary {
+                Text(adhdSummary)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .accessibilityLabel(adhdSummary)
+                    .accessibilityIdentifier("scenario.adhd.\(scenario.file)")
             }
 
             // The command gets the full row width and two lines. Squeezed

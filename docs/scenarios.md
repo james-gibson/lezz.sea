@@ -51,6 +51,15 @@ The row copies this block with the ports the members actually bound. adhd
 appends `/status` to each endpoint, so a federation cluster stays visible to
 adhd as more than its leader.
 
+In the **Lab build** the launcher also pairs adhd by itself: once every member
+answers, it writes `<cluster>/adhd.yaml` (the same `smoke_alarm` entries, an
+`mcp_server.addr` on a free port in 9190–9289, and the checkout's
+`features/*.feature` glob), starts `adhd --headless --config <cluster>/adhd.yaml`
+with its output in `<cluster>/adhd.log`, and records the endpoint under the
+`adhd` key in `cluster.json`. The row then reads `adhd: :9190 · N lights` and
+offers **Reveal adhd log**; Stop stops adhd before the alarms. A machine without
+adhd gets `adhd: not installed …` on the row — the alarm still runs.
+
 For traceability, adhd's `features.binaries[].gherkin_files` points at the
 smoke-alarm feature files. `internal/report/scanner.go` then cross-references
 the JSONL traffic log against those Gherkin scenarios, so a scenario can be
@@ -87,7 +96,10 @@ The Lab launcher:
    upward from the preferred port and accepting a port only when `/status`
    names that member's isotope. The mDNS advertisement is used when it answers;
    loopback does not depend on the local-network permission mDNS needs.
-6. Stops it with `lezz run ocd-smoke-alarm ops stop -pid-file <pid>` per member.
+6. Writes and starts a paired adhd (see above) once every member answers, and
+   records its endpoint in `cluster.json`.
+7. Stops adhd and then the alarms: `lezz run ocd-smoke-alarm ops stop -pid-file
+   <pid>` per member.
 
 ### Ports are not moved; identity is rotated
 
@@ -189,9 +201,10 @@ The script:
   `member-<n>/alarm.log` says which port failed.
 - `npx`/`uvx` targets need a useful PATH; the launcher prepends
   `/opt/homebrew/bin` and `/usr/local/bin`.
-- adhd pairing is copied by the app and launched by the script; the app does not
-  write an adhd config or launch adhd yet, and the `scanner.go` report row is
-  not shown.
+- adhd pairing is written and launched by the app in the Lab build, and recorded
+  in `cluster.json`; `scripts/lab-cluster.sh --pair-adhd` does the same from
+  outside it. The `scanner.go` report row is not shown yet: the report is not
+  exposed over adhd's MCP surface, so there is nothing for the app to read.
 
 ## What is deliberately not here
 

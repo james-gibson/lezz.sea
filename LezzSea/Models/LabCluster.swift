@@ -26,6 +26,10 @@ struct LabCluster: Codable, Identifiable, Hashable, Sendable {
     let rootPort: Int?
     let startedAt: Date
     let members: [LabMember]
+    /// The headless adhd watching this cluster, when one was paired. The same
+    /// block scripts/lab-cluster.sh writes under `adhd`; nil means nothing is
+    /// watching yet, not that the pairing failed.
+    var adhd: LabADHD? = nil
 
     var id: String { slug }
 
@@ -80,6 +84,37 @@ struct LabMember: Codable, Identifiable, Hashable, Sendable {
 
     func healthURL(port: Int) -> URL {
         URL(string: "http://127.0.0.1:\(port)/status")!
+    }
+}
+
+// MARK: - adhd pairing
+
+/// One headless adhd paired with a cluster.
+///
+/// The shape is the contract `scripts/lab-cluster.sh --pair-adhd` writes:
+/// the endpoint the UI can connect to, the port adhd bound, and where its
+/// config and pid file live. The log is the sibling `adhd.log` the launcher
+/// redirects stdout to, so it is derived rather than stored twice.
+struct LabADHD: Codable, Hashable, Sendable {
+    let endpoint: String
+    let port: Int
+    let configPath: String
+    let pidPath: String
+
+    var configURL: URL {
+        URL(fileURLWithPath: configPath)
+    }
+
+    var directory: URL {
+        configURL.deletingLastPathComponent()
+    }
+
+    var logURL: URL {
+        directory.appendingPathComponent("adhd.log")
+    }
+
+    var mcpURL: URL? {
+        URL(string: endpoint)
     }
 }
 

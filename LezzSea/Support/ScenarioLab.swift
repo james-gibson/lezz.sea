@@ -29,6 +29,10 @@ import AppKit
 import Foundation
 import Observation
 
+#if canImport(Darwin)
+import Darwin
+#endif
+
 @MainActor
 @Observable
 final class ScenarioLab {
@@ -59,11 +63,19 @@ final class ScenarioLab {
     /// mDNS, or from a `/status` answer that names the isotope.
     private(set) var resolvedPorts: [String: Int] = [:]
     private(set) var busy: Set<String> = []
+    /// The clusters whose paired adhd answered the last probe.
+    private(set) var adhdAnswering: Set<String> = []
+    /// How many lights the paired adhd reports, when it answered.
+    private(set) var adhdLights: [String: Int] = [:]
+    /// Why a pairing did not happen, keyed by cluster. Shown on the row so a
+    /// missing adhd is visible without failing the launch that succeeded.
+    private(set) var pairingNotes: [String: String] = [:]
     var lastError: String?
 
     private let bookmarkKey = "lab.smokeAlarmCheckout"
     private let fileManager = FileManager.default
     private let watcher = ServicePortWatcher(serviceType: ScenarioConfig.discoveryType)
+    private let adhdClient = ADHDClient()
     @ObservationIgnored private var advertisedPorts: [String: Int] = [:]
     @ObservationIgnored private var watching = false
 
@@ -181,6 +193,21 @@ final class ScenarioLab {
         resolvedPorts[member.isotope]
     }
 
+    /// The pairing line for a row: the endpoint adhd answers on and how many
+    /// lights it reports, or why it is not there. nil before a launch, when
+    /// there is nothing to pair yet.
+    func adhdSummary(for cluster: LabCluster) -> String? {
+        if let note = pairingNotes[cluster.id] {
+            return "adhd: \(note)"
+        }
+        guard let adhd = cluster.adhd else { return nil }
+        guard adhdAnswering.contains(cluster.id) else {
+            return "adhd: :\(adhd.port) not answering"
+        }
+        let lights = adhdLights[cluster.id].map { " · \($0) lights" } ?? ""
+        return "adhd: :\(adhd.port)\(lights)"
+    }
+
     // MARK: - Launch
 
     func launch(_ scenario: ScenarioCatalog.Scenario) async {
@@ -231,6 +258,10 @@ final class ScenarioLab {
             }
 
             await waitForHealth(cluster)
+
+            if states[cluster.id] == .running {
+                await pair(cluster)
+            }
         } catch {
             if let created, states[created.id] == .starting {
                 removeMetadata(created)
@@ -306,6 +337,179 @@ final class ScenarioLab {
             + "Reveal the cluster directory to read member-1/alarm.log."
     }
 
+    // MARK: - Pairing
+
+    /// Starts a headless adhd that watches the cluster, and records its
+    /// endpoint in `cluster.json` under the same `adhd` key the verification
+    /// script writes.
+    ///
+    /// Pairing is best effort and after the fact: the alarm is already running,
+    /// so a machine without adhd gets a note on the row rather than a failed
+    /// launch. Every endpoint is a port whose `/status` named its member; a
+    /// member that never resolved is not guessed at.
+    private func pair(_ cluster: LabCluster) async {
+        guard cluster.adhd == nil else { return }
+
+        guard let adhdBinary = adhdBinary() else {
+            pairingNotes[cluster.id] = "not installed — the alarm is running, but nothing is watching it"
+            return
+        }
+
+        let ports = cluster.members.compactMap { resolvedPorts[$0.isotope] }
+        guard ports.count == cluster.members.count else {
+            pairingNotes[cluster.id] = "waits for every member's bound port"
+            return
+        }
+
+        guard let mcpPort = ADHDPairing.freePort() else {
+            pairingNotes[cluster.id] = "no free port in "
+                + "\(ADHDPairing.portRange.lowerBound)–\(ADHDPairing.portRange.upperBound)"
+            return
+        }
+
+        let directory = clusterDirectory(cluster)
+        let features = checkout?.appendingPathComponent("features", isDirectory: true)
+        let gherkinDirectory = features.flatMap {
+            fileManager.fileExists(atPath: $0.path) ? $0 : nil
+        }
+
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+            let configURL = directory.appendingPathComponent("adhd.yaml")
+            try ADHDPairing.config(
+                slug: cluster.slug,
+                healthPorts: ports,
+                mcpPort: mcpPort,
+                gherkinDirectory: gherkinDirectory
+            )
+            .write(to: configURL, atomically: true, encoding: .utf8)
+
+            let logPath = directory.appendingPathComponent("adhd.log").path
+            let pidPath = directory.appendingPathComponent("adhd.pid").path
+
+            // An interrupted run can leave an adhd behind even though its
+            // cluster.json is gone. Stop the orphan before writing over its pid
+            // file, or two watchers would answer for this alarm and only one
+            // would ever be stopped.
+            stopProcess(atPIDFile: pidPath)
+
+            let process = try start(adhdBinary, ["--headless", "--config", configURL.path], log: logPath)
+            try "\(process.processIdentifier)\n".write(
+                toFile: pidPath,
+                atomically: true,
+                encoding: .utf8
+            )
+
+            let record = LabADHD(
+                endpoint: "http://127.0.0.1:\(mcpPort)/mcp",
+                port: mcpPort,
+                configPath: configURL.path,
+                pidPath: pidPath
+            )
+            try store(record, on: cluster)
+            pairingNotes[cluster.id] = nil
+
+            await waitForADHD(cluster)
+        } catch {
+            pairingNotes[cluster.id] = error.localizedDescription
+        }
+    }
+
+    /// Writes the pairing into the contract and the in-memory copy, so the row
+    /// and `cluster.json` agree immediately.
+    private func store(_ adhd: LabADHD, on cluster: LabCluster) throws {
+        guard let index = clusters.firstIndex(where: { $0.id == cluster.id }) else { return }
+        clusters[index].adhd = adhd
+        try writeMetadata(clusters[index])
+    }
+
+    /// adhd opens its MCP port a moment after `Process.run` returns. A probe is
+    /// the readiness check: an answer also gives the row its light count.
+    private func waitForADHD(_ cluster: LabCluster) async {
+        guard
+            let index = clusters.firstIndex(where: { $0.id == cluster.id }),
+            let adhd = clusters[index].adhd,
+            let endpoint = adhd.mcpURL
+        else { return }
+
+        for _ in 0..<15 {
+            if let lights = try? await adhdClient.lights(at: endpoint) {
+                adhdAnswering.insert(cluster.id)
+                adhdLights[cluster.id] = lights.count
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        pairingNotes[cluster.id] = "did not answer on :\(adhd.port) — see adhd.log"
+    }
+
+    /// Keeps the pairing line live after launch: an adhd that was stopped
+    /// outside the app stops being reported as answering.
+    private func refreshADHD(_ cluster: LabCluster) async {
+        guard let adhd = cluster.adhd, let endpoint = adhd.mcpURL else { return }
+
+        if let lights = try? await adhdClient.lights(at: endpoint) {
+            adhdAnswering.insert(cluster.id)
+            adhdLights[cluster.id] = lights.count
+            pairingNotes[cluster.id] = nil
+        } else {
+            adhdAnswering.remove(cluster.id)
+        }
+    }
+
+    /// Stops adhd before its alarms, so it is not woken by the shutdown it is
+    /// watching. The pid file is checked against the executable name: a pid
+    /// that has been reused is not adhd, and is left alone.
+    private func stopADHD(_ cluster: LabCluster) {
+        guard let adhd = cluster.adhd else { return }
+
+        stopProcess(atPIDFile: adhd.pidPath)
+
+        adhdAnswering.remove(cluster.id)
+        adhdLights[cluster.id] = nil
+        pairingNotes[cluster.id] = nil
+    }
+
+    /// Stops the adhd named by a pid file. The executable name is checked
+    /// first: a pid that has been reused is not adhd, and is left alone.
+    private func stopProcess(atPIDFile path: String) {
+        defer { try? fileManager.removeItem(atPath: path) }
+
+        guard
+            let text = try? String(contentsOfFile: path, encoding: .utf8),
+            let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+            pid > 0,
+            processName(of: pid) == "adhd"
+        else { return }
+
+        kill(pid, SIGTERM)
+        for _ in 0..<20 {
+            if processName(of: pid) != "adhd" { return }
+            usleep(100_000)
+        }
+        if processName(of: pid) == "adhd" {
+            kill(pid, SIGKILL)
+        }
+    }
+
+    /// The executable's last path component, or nil when the pid is gone.
+    private func processName(of pid: Int32) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * 1024)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(cString: buffer).split(separator: "/").last.map(String.init)
+    }
+
+    private func adhdBinary() -> String? {
+        let candidates = [
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".lezz/bin/adhd").path,
+            "/opt/homebrew/bin/adhd",
+            "/usr/local/bin/adhd",
+        ]
+        return candidates.first { fileManager.isExecutableFile(atPath: $0) }
+    }
+
     // MARK: - Stop
 
     func stop(_ cluster: LabCluster) async {
@@ -313,6 +517,8 @@ final class ScenarioLab {
 
         busy.insert(cluster.id)
         defer { busy.remove(cluster.id) }
+
+        stopADHD(cluster)
 
         for member in cluster.members {
             _ = try? runLezz([
@@ -347,6 +553,15 @@ final class ScenarioLab {
         NSWorkspace.shared.activateFileViewerSelecting([directory.deletingLastPathComponent()])
     }
 
+    func revealADHD(_ cluster: LabCluster) {
+        guard let adhd = cluster.adhd else { return }
+        if fileManager.fileExists(atPath: adhd.logURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([adhd.logURL])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([adhd.directory])
+        }
+    }
+
     // MARK: - Health
 
     func monitor() async {
@@ -375,6 +590,7 @@ final class ScenarioLab {
         // member bound. Resolve those here so both are available before the
         // operator copies anything.
         await resolvePorts(for: cluster)
+        await refreshADHD(cluster)
     }
 
     /// A federation cluster is whole when its root answers and every member's
@@ -546,6 +762,9 @@ final class ScenarioLab {
         for id in Array(states.keys) where !listed.contains(id) {
             states[id] = nil
             membersUp[id] = nil
+            adhdAnswering.remove(id)
+            adhdLights[id] = nil
+            pairingNotes[id] = nil
         }
         for cluster in found where states[cluster.id] == nil {
             states[cluster.id] = .starting
@@ -569,6 +788,9 @@ final class ScenarioLab {
         clusters.removeAll { $0.id == cluster.id }
         states[cluster.id] = nil
         membersUp[cluster.id] = nil
+        adhdAnswering.remove(cluster.id)
+        adhdLights[cluster.id] = nil
+        pairingNotes[cluster.id] = nil
         for member in cluster.members {
             resolvedPorts[member.isotope] = nil
         }
@@ -600,9 +822,23 @@ final class ScenarioLab {
         guard let lezz = lezzBinary() else {
             throw LabError.lezzMissing
         }
+        let process = try start(lezz, arguments, log: log)
+        if wait {
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+        return 0
+        #else
+        throw LabError.labBuildRequired
+        #endif
+    }
 
+    /// Starts a child with an app-built argument list and its output appended
+    /// to `log`. The paired adhd needs the same PATH and the same log handling
+    /// as `lezz`, and its pid so the row can stop it later.
+    private func start(_ executable: String, _ arguments: [String], log: String?) throws -> Process {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: lezz)
+        process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
 
         if let log {
@@ -630,15 +866,7 @@ final class ScenarioLab {
         process.environment = environment
 
         try process.run()
-
-        if wait {
-            process.waitUntilExit()
-            return process.terminationStatus
-        }
-        return 0
-        #else
-        throw LabError.labBuildRequired
-        #endif
+        return process
     }
 }
 

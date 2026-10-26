@@ -41,7 +41,13 @@ struct LabClusterTests {
           "logPath": "/tmp/lab/member-2/alarm.log",
           "stateDir": "/tmp/lab/member-2/state"
         }
-      ]
+      ],
+      "adhd": {
+        "endpoint": "http://127.0.0.1:9190/mcp",
+        "port": 9190,
+        "configPath": "/tmp/lab/adhd.yaml",
+        "pidPath": "/tmp/lab/adhd.pid"
+      }
     }
     """
 
@@ -66,8 +72,37 @@ struct LabClusterTests {
         #expect(cluster.members[0].healthURL(port: 18_089).absoluteString == "http://127.0.0.1:18089/status")
     }
 
-    @Test func aMemberIsFoundByIsotopeNotByPort() throws {
+    @Test func decodesThePairedADHD() throws {
         let cluster = try cluster
+
+        #expect(cluster.adhd?.port == 9_190)
+        #expect(cluster.adhd?.mcpURL?.absoluteString == "http://127.0.0.1:9190/mcp")
+        #expect(cluster.adhd?.configURL.path == "/tmp/lab/adhd.yaml")
+        #expect(cluster.adhd?.logURL.path == "/tmp/lab/adhd.log")
+    }
+
+    @Test func anUnpairedClusterOmitsTheADHDKey() throws {
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        var unpairedJSON = object
+        unpairedJSON.removeValue(forKey: "adhd")
+        let data = try JSONSerialization.data(withJSONObject: unpairedJSON)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let unpaired = try decoder.decode(LabCluster.self, from: data)
+        #expect(unpaired.adhd == nil)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try #require(
+            try JSONSerialization.jsonObject(with: encoder.encode(unpaired)) as? [String: Any]
+        )
+        #expect(encoded["adhd"] == nil)
+    }
+
+    @Test func aMemberIsFoundByIsotopeNotByPort() throws {        let cluster = try cluster
         #expect(cluster.member(for: "ocd-smoke-alarm-federation-mesh-2")?.index == 2)
         #expect(cluster.member(for: "ocd-smoke-alarm-federation-mesh-3") == nil)
     }
