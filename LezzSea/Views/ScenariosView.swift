@@ -5,7 +5,8 @@
 //  The scenario catalog: smoke-alarm's ready-to-run configs, grouped by the
 //  theme each one exercises. A row carries the lab command, the adhd pairing
 //  block, and — when a checkout is selected — a launch through the signed
-//  Lezz.app with a derived, port-isolated config.
+//  Lezz.app with a derived, port-isolated config, a paired headless adhd, and
+//  the watcher half of its Gherkin report.
 //
 
 import AppKit
@@ -57,12 +58,19 @@ struct ScenariosView: View {
                                     state: lab.state(for: scenario),
                                     membersUp: lab.membersUp(for: scenario),
                                     port: cluster?.members.first.flatMap { lab.port(for: $0) },
+                                    adhdSummary: cluster.flatMap { lab.adhdSummary(for: $0) },
+                                    report: cluster.flatMap { lab.report(for: $0) },
                                     busy: lab.busy.contains(scenario.id)
                                         || (cluster.map { lab.busy.contains($0.id) } ?? false),
                                     copied: copied == scenario.id,
                                     onCopy: { copy(scenario, cluster: cluster) },
                                     onCopyScript: { copyScript(scenario) },
                                     onCopyADHD: { copyADHD(scenario, cluster: cluster) },
+                                    onCopyReport: {
+                                        if let cluster, let report = lab.report(for: cluster) {
+                                            copyReport(scenario, report: report)
+                                        }
+                                    },
                                     onLaunch: { Task { await lab.launch(scenario) } },
                                     onStop: {
                                         if let cluster {
@@ -71,6 +79,9 @@ struct ScenariosView: View {
                                     },
                                     onReveal: {
                                         if let cluster { lab.reveal(cluster) }
+                                    },
+                                    onRevealADHD: {
+                                        if let cluster { lab.revealADHD(cluster) }
                                     },
                                     onOpen: { NSWorkspace.shared.open(scenario.url) }
                                 )
@@ -260,6 +271,14 @@ struct ScenariosView: View {
 
         AccessibilityAnnouncer.announce("adhd smoke_alarm block for \(scenario.name) copied.")
     }
+
+    private func copyReport(_ scenario: ScenarioCatalog.Scenario, report: WatcherReport) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(report.text, forType: .string)
+
+        AccessibilityAnnouncer.announce("Gherkin report for \(scenario.name) copied.")
+    }
 }
 
 // MARK: - Section header
@@ -298,18 +317,30 @@ private struct ScenarioRow: View {
     let state: ScenarioLab.RunState?
     let membersUp: Int?
     let port: Int?
+    let adhdSummary: String?
+    let report: WatcherReport?
     let busy: Bool
     let copied: Bool
     let onCopy: () -> Void
     let onCopyScript: () -> Void
     let onCopyADHD: () -> Void
+    let onCopyReport: () -> Void
     let onLaunch: () -> Void
     let onStop: () -> Void
     let onReveal: () -> Void
+    let onRevealADHD: () -> Void
     let onOpen: () -> Void
 
     private var command: String {
         cluster?.members.first?.launchCommand ?? scenario.command
+    }
+
+    private func tint(for status: WatcherReport.Status) -> Color {
+        switch status {
+        case .pass: .green
+        case .fail: .red
+        case .noCoverage: .secondary
+        }
     }
 
     var body: some View {
@@ -381,6 +412,12 @@ private struct ScenarioRow: View {
                     #if LAB_LAUNCHER
                     if cluster != nil {
                         Button("Reveal cluster directory") { onReveal() }
+                        if cluster?.adhd != nil {
+                            Button("Reveal adhd log") { onRevealADHD() }
+                        }
+                        if report != nil {
+                            Button("Copy Gherkin report") { onCopyReport() }
+                        }
                         Divider()
                     }
                     if !scenario.isLaunchable {
@@ -417,6 +454,52 @@ private struct ScenarioRow: View {
                 Text("Note: \(note)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+
+            // The pairing is a fact about the running cluster, not the sample:
+            // it names the adhd endpoint that is watching these members.
+            if let adhdSummary {
+                Text(adhdSummary)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .accessibilityLabel(adhdSummary)
+                    .accessibilityIdentifier("scenario.adhd.\(scenario.file)")
+            }
+
+            // The Gherkin report is the watcher half of adhd's scanner: the
+            // scenarios its `light-update` lines can confirm. Collapsed by
+            // default so a running row stays the height of a catalog row.
+            if let report {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(report.rows) { row in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(row.status.symbol)
+                                    .accessibilityHidden(true)
+                                Text(row.name)
+                                Spacer(minLength: 8)
+                                Text(row.status.label)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(tint(for: row.status))
+                            .help(row.note)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(row.name): \(row.status.label). \(row.note)")
+                            .accessibilityIdentifier("scenario.report.row.\(scenario.file).\(row.id)")
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("Gherkin report · \(report.summary)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Gherkin report: \(report.summary)")
+                .accessibilityIdentifier("scenario.report.\(scenario.file)")
             }
 
             // The command gets the full row width and two lines. Squeezed
