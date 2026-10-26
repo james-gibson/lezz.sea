@@ -70,12 +70,15 @@ final class ScenarioLab {
     /// Why a pairing did not happen, keyed by cluster. Shown on the row so a
     /// missing adhd is visible without failing the launch that succeeded.
     private(set) var pairingNotes: [String: String] = [:]
+    /// The watcher report for a paired cluster, rebuilt from its adhd.log.
+    private(set) var reports: [String: WatcherReport] = [:]
     var lastError: String?
 
     private let bookmarkKey = "lab.smokeAlarmCheckout"
     private let fileManager = FileManager.default
     private let watcher = ServicePortWatcher(serviceType: ScenarioConfig.discoveryType)
     private let adhdClient = ADHDClient()
+    @ObservationIgnored private var reportScans: [String: WatcherReport.Scanner] = [:]
     @ObservationIgnored private var advertisedPorts: [String: Int] = [:]
     @ObservationIgnored private var watching = false
 
@@ -206,6 +209,12 @@ final class ScenarioLab {
         }
         let lights = adhdLights[cluster.id].map { " · \($0) lights" } ?? ""
         return "adhd: :\(adhd.port)\(lights)"
+    }
+
+    /// The watcher report for a paired cluster. nil before a pairing exists,
+    /// and after the cluster is stopped.
+    func report(for cluster: LabCluster) -> WatcherReport? {
+        reports[cluster.id]
     }
 
     // MARK: - Launch
@@ -393,6 +402,8 @@ final class ScenarioLab {
             // file, or two watchers would answer for this alarm and only one
             // would ever be stopped.
             stopProcess(atPIDFile: pidPath)
+            reports[cluster.id] = nil
+            reportScans[cluster.id] = nil
 
             let process = try start(adhdBinary, ["--headless", "--config", configURL.path], log: logPath)
             try "\(process.processIdentifier)\n".write(
@@ -591,6 +602,23 @@ final class ScenarioLab {
         // operator copies anything.
         await resolvePorts(for: cluster)
         await refreshADHD(cluster)
+        refreshReport(cluster)
+    }
+
+    /// Parses only the log lines that arrived since the last tick. The report
+    /// is derived from the same file the Events panel reads; a cluster without
+    /// a paired adhd has no log to score.
+    private func refreshReport(_ cluster: LabCluster) {
+        guard let adhd = cluster.adhd else {
+            reports[cluster.id] = nil
+            reportScans[cluster.id] = nil
+            return
+        }
+
+        var scan = reportScans[cluster.id] ?? WatcherReport.Scanner()
+        scan.update(url: adhd.logURL)
+        reportScans[cluster.id] = scan
+        reports[cluster.id] = WatcherReport(evidence: scan.evidence)
     }
 
     /// A federation cluster is whole when its root answers and every member's
@@ -765,6 +793,8 @@ final class ScenarioLab {
             adhdAnswering.remove(id)
             adhdLights[id] = nil
             pairingNotes[id] = nil
+            reports[id] = nil
+            reportScans[id] = nil
         }
         for cluster in found where states[cluster.id] == nil {
             states[cluster.id] = .starting
@@ -791,6 +821,8 @@ final class ScenarioLab {
         adhdAnswering.remove(cluster.id)
         adhdLights[cluster.id] = nil
         pairingNotes[cluster.id] = nil
+        reports[cluster.id] = nil
+        reportScans[cluster.id] = nil
         for member in cluster.members {
             resolvedPorts[member.isotope] = nil
         }

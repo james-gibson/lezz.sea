@@ -39,10 +39,10 @@ that cluster's lab can run.
   the Lab build a row launches a single-process scenario: it derives a config
   with absolute state, rotates the isotope name for mDNS, runs the alarm
   headless, learns the port it bound, pairs a headless adhd watching that port,
-  and stops both. Multi-process clusters are started by
-  `scripts/lab-cluster.sh` until the launcher's discovery has been verified
-  against them. The sandboxed build copies the command and the block instead.
-  See `docs/scenarios.md`.
+  scores the watcher half of adhd's Gherkin report from its log, and stops both.
+  Multi-process clusters are started by `scripts/lab-cluster.sh` until the
+  launcher's discovery has been verified against them. The sandboxed build
+  copies the command and the block instead. See `docs/scenarios.md`.
 - **Discovery.** Checks the lezz cluster registry (`:19100/cluster`), probes the
   default adhd endpoint (`127.0.0.1:9090/mcp`), and watches Bonjour for
   `_adhd-isotope._tcp`.

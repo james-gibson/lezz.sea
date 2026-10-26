@@ -75,6 +75,30 @@ features:
         - "../smoke-alarm/features/*.feature"
 ```
 
+### The watcher report
+
+`WatcherReport` (`LezzSea/Models/WatcherReport.swift`) ports the half of adhd's
+`internal/report/scanner.go` that a paired instance can produce. The scanner
+aggregates two kinds of evidence: MCP request/response lines, and the
+`light-update` lines the smokelink watcher writes. A paired adhd writes only the
+second kind, so the row scores `features/adhd/smoke-alarm-network.feature`'s
+watcher scenarios: polling, light naming, status mapping, SSE, transitions,
+multiple endpoints, graceful unavailability, proxy visibility and convergence.
+
+The row reads `Gherkin report · 7 pass · 1 fail · 1 no coverage` and expands to
+each scenario with its evidence (`1 poll events across 1 endpoint(s)`). A
+scenario whose evidence has not happened yet is NO COVERAGE, not FAIL — the same
+distinction `matcher.go` makes. **Copy Gherkin report** copies the rows as text.
+
+Two limits are deliberate:
+
+- It scores the Gherkin adhd ships for `smoke-alarm-network`, not the sample's
+  own `.feature` file. `scanner.go` only defines specs for adhd's domains;
+  pointed at smoke-alarm's features it returns NOT VERIFIABLE for every row.
+- The MCP half needs adhd's own feature files and its own MCP traffic. A paired
+  instance loads the checkout's features but serves no adhd MCP traffic of its
+  own, so those rows would all be NOT VERIFIABLE too.
+
 ## Launching (Lab build)
 
 macOS refuses to start an external process from the sandbox. An SMAppService
@@ -203,8 +227,10 @@ The script:
   `/opt/homebrew/bin` and `/usr/local/bin`.
 - adhd pairing is written and launched by the app in the Lab build, and recorded
   in `cluster.json`; `scripts/lab-cluster.sh --pair-adhd` does the same from
-  outside it. The `scanner.go` report row is not shown yet: the report is not
-  exposed over adhd's MCP surface, so there is nothing for the app to read.
+  outside it. The row then scores the **watcher** half of `scanner.go`'s report
+  from the paired adhd's log (below). The MCP-request half is not shown: it
+  needs adhd's own `features/adhd/*.feature`, which a paired instance does not
+  load, so it would report only NOT VERIFIABLE.
 
 ## What is deliberately not here
 

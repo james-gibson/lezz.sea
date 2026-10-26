@@ -103,6 +103,21 @@ final class LabClusterUITests: XCTestCase {
             expected,
             "the adhd block did not cover every member: discovery did not resolve the bound ports"
         )
+
+        // The paired adhd's watcher report is read from the same cluster.json
+        // and adhd.log the script wrote. With no light-update lines yet it is
+        // honestly all NO COVERAGE, but the row has to be there.
+        let report = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Gherkin report"))
+            .firstMatch
+        XCTAssertTrue(
+            report.waitForExistence(timeout: 15),
+            "the Gherkin report row did not appear for a paired cluster"
+        )
+        XCTAssertTrue(
+            report.label.contains("no coverage"),
+            "the report row did not carry the watcher verdict: \(report.label)"
+        )
     }
 
     /// The launcher path itself: derive, run, find the port the alarm bound,
