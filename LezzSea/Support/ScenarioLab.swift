@@ -95,9 +95,8 @@ final class ScenarioLab {
         startWatchingIfNeeded()
     }
 
-    /// Browsing triggers the local-network prompt, and the sandboxed build can
-    /// never have a launcher cluster to resolve. Only browse once a cluster
-    /// exists to browse for.
+    /// Browsing triggers the local-network prompt, so only browse once a
+    /// cluster exists to browse for.
     private func startWatchingIfNeeded() {
         guard !watching, !clusters.isEmpty else { return }
         watching = true
@@ -861,6 +860,14 @@ final class ScenarioLab {
                 let data = try? Data(contentsOf: url),
                 let cluster = try? decoder.decode(LabCluster.self, from: data)
             else { return nil }
+            // A cluster whose configs lezz.go owns was started through the
+            // channel. Without a channel this build cannot stop it (and did not
+            // start it), so a stale row after a crash is dropped rather than
+            // offered a Stop that cannot work. The Lab build's clusters live
+            // under this same root and stay visible.
+            if !channel.isActive, !cluster.members.allSatisfy({ $0.configPath.hasPrefix(clustersRoot.path + "/") }) {
+                return nil
+            }
             return cluster
         }
         .sorted { $0.startedAt < $1.startedAt }

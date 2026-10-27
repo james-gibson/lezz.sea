@@ -152,7 +152,9 @@ there either. The request therefore carries the derived YAML itself; lezz.go
 owns `~/.lezz/sea/Clusters`, writes the config and state under it, and the app
 keeps only `cluster.json` in its container for display. The row's
 `Reveal` action is a channel request because the paths are outside the app's
-sandbox.
+sandbox. A Finder launch (no channel) drops a `cluster.json` whose configs live
+under `~/.lezz/sea`: that build cannot stop what lezz.go started. Launch through
+`lezz sea run` to see and stop it.
 
 The channel is not a general remote control. The app sends a cluster slug and
 derived YAML, never a binary or argv; the supervisor's verbs are `start`,
