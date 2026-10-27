@@ -78,6 +78,7 @@ final class ScenarioLab {
     private let fileManager = FileManager.default
     private let watcher = ServicePortWatcher(serviceType: ScenarioConfig.discoveryType)
     private let adhdClient = ADHDClient()
+    private let channel = LabChannel.shared
     @ObservationIgnored private var reportScans: [String: WatcherReport.Scanner] = [:]
     @ObservationIgnored private var advertisedPorts: [String: Int] = [:]
     @ObservationIgnored private var watching = false
@@ -251,19 +252,27 @@ final class ScenarioLab {
 
         do {
             let source = try String(contentsOf: sample, encoding: .utf8)
-            let cluster = try prepare(source: source, scenario: scenario)
+            let prepared = try prepare(source: source, scenario: scenario)
+            let cluster = prepared.cluster
             try writeMetadata(cluster)
 
             created = cluster
             clusters.append(cluster)
             states[cluster.id] = .starting
 
-            for member in cluster.members {
-                _ = try runLezz([
-                    "run", "ocd-smoke-alarm", "serve",
-                    "--config=\(member.configPath)",
-                    "--mode=headless",
-                ], log: member.logPath, wait: false)
+            if channel.isActive {
+                let reply = try await channel.startIsotope(cluster, configs: prepared.configs)
+                guard reply.ok == true else {
+                    throw LabError.channel(reply.error ?? "lezz refused the isotope request.")
+                }
+            } else {
+                for member in cluster.members {
+                    _ = try runLezz([
+                        "run", "ocd-smoke-alarm", "serve",
+                        "--config=\(member.configPath)",
+                        "--mode=headless",
+                    ], log: member.logPath, wait: false)
+                }
             }
 
             await waitForHealth(cluster)
@@ -279,14 +288,31 @@ final class ScenarioLab {
         }
     }
 
+    private struct Prepared {
+        let cluster: LabCluster
+        /// The derived YAML per member, in member order. The channel sends it
+        /// as data; lezz.go writes it under its own lab root.
+        let configs: [String]
+    }
+
     private func prepare(
         source: String,
         scenario: ScenarioCatalog.Scenario
-    ) throws -> LabCluster {
-        let clusterDirectory = clustersRoot
-            .appendingPathComponent(scenario.slug, isDirectory: true)
+    ) throws -> Prepared {
+        // Through the channel the instance directory belongs to lezz.go, not
+        // `clustersRoot`: the app's container is TCC-protected from lezz.go.
+        let clusterDirectory: URL
+        if channel.isActive {
+            guard let labRoot = channel.labRoot else {
+                throw LabError.channel("lezz did not announce a lab root")
+            }
+            clusterDirectory = labRoot.appendingPathComponent(scenario.slug, isDirectory: true)
+        } else {
+            clusterDirectory = clustersRoot.appendingPathComponent(scenario.slug, isDirectory: true)
+        }
 
         var members: [LabMember] = []
+        var configs: [String] = []
         var clusterID: String?
         var rootPort: Int?
 
@@ -300,12 +326,15 @@ final class ScenarioLab {
                 index: index
             )
 
-            try fileManager.createDirectory(
-                at: memberDirectory.appendingPathComponent("state", isDirectory: true),
-                withIntermediateDirectories: true
-            )
-            let configURL = memberDirectory.appendingPathComponent("config.yaml")
-            try derived.text.write(to: configURL, atomically: true, encoding: .utf8)
+            if !channel.isActive {
+                try fileManager.createDirectory(
+                    at: memberDirectory.appendingPathComponent("state", isDirectory: true),
+                    withIntermediateDirectories: true
+                )
+                let configURL = memberDirectory.appendingPathComponent("config.yaml")
+                try derived.text.write(to: configURL, atomically: true, encoding: .utf8)
+            }
+            configs.append(derived.text)
 
             clusterID = derived.clusterID
             rootPort = derived.rootPort
@@ -314,21 +343,24 @@ final class ScenarioLab {
                 index: index,
                 isotope: derived.isotope,
                 preferredHealthPort: derived.preferredHealthPort,
-                configPath: configURL.path,
+                configPath: memberDirectory.appendingPathComponent("config.yaml").path,
                 pidPath: memberDirectory.appendingPathComponent("ocd-smoke-alarm.pid").path,
                 logPath: memberDirectory.appendingPathComponent("alarm.log").path,
                 stateDir: memberDirectory.appendingPathComponent("state", isDirectory: true).path
             ))
         }
 
-        return LabCluster(
-            scenarioID: scenario.file,
-            name: scenario.name,
-            slug: scenario.slug,
-            clusterID: clusterID,
-            rootPort: rootPort,
-            startedAt: .now,
-            members: members
+        return Prepared(
+            cluster: LabCluster(
+                scenarioID: scenario.file,
+                name: scenario.name,
+                slug: scenario.slug,
+                clusterID: clusterID,
+                rootPort: rootPort,
+                startedAt: .now,
+                members: members
+            ),
+            configs: configs
         )
     }
 
@@ -359,14 +391,51 @@ final class ScenarioLab {
     private func pair(_ cluster: LabCluster) async {
         guard cluster.adhd == nil else { return }
 
-        guard let adhdBinary = adhdBinary() else {
-            pairingNotes[cluster.id] = "not installed — the alarm is running, but nothing is watching it"
-            return
-        }
-
         let ports = cluster.members.compactMap { resolvedPorts[$0.isotope] }
         guard ports.count == cluster.members.count else {
             pairingNotes[cluster.id] = "waits for every member's bound port"
+            return
+        }
+
+        let features = checkout?.appendingPathComponent("features", isDirectory: true)
+        let gherkinDirectory = features.flatMap {
+            fileManager.fileExists(atPath: $0.path) ? $0 : nil
+        }
+        reports[cluster.id] = nil
+        reportScans[cluster.id] = nil
+
+        // Through the channel, lezz.go owns the adhd config, the port and the
+        // process. The app only supplies the endpoints it resolved.
+        if channel.isActive {
+            do {
+                let reply = try await channel.pairADHD(
+                    slug: cluster.slug,
+                    healthPorts: ports,
+                    gherkin: gherkinDirectory
+                )
+                guard reply.ok == true, let adhd = reply.adhd else {
+                    pairingNotes[cluster.id] = reply.error ?? "adhd pairing was refused"
+                    return
+                }
+                try store(
+                    LabADHD(
+                        endpoint: adhd.endpoint,
+                        port: adhd.port,
+                        configPath: adhd.configPath,
+                        pidPath: adhd.pidPath
+                    ),
+                    on: cluster
+                )
+                pairingNotes[cluster.id] = nil
+                await waitForADHD(cluster)
+            } catch {
+                pairingNotes[cluster.id] = error.localizedDescription
+            }
+            return
+        }
+
+        guard let adhdBinary = adhdBinary() else {
+            pairingNotes[cluster.id] = "not installed — the alarm is running, but nothing is watching it"
             return
         }
 
@@ -377,10 +446,6 @@ final class ScenarioLab {
         }
 
         let directory = clusterDirectory(cluster)
-        let features = checkout?.appendingPathComponent("features", isDirectory: true)
-        let gherkinDirectory = features.flatMap {
-            fileManager.fileExists(atPath: $0.path) ? $0 : nil
-        }
 
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -402,8 +467,6 @@ final class ScenarioLab {
             // file, or two watchers would answer for this alarm and only one
             // would ever be stopped.
             stopProcess(atPIDFile: pidPath)
-            reports[cluster.id] = nil
-            reportScans[cluster.id] = nil
 
             let process = try start(adhdBinary, ["--headless", "--config", configURL.path], log: logPath)
             try "\(process.processIdentifier)\n".write(
@@ -529,13 +592,20 @@ final class ScenarioLab {
         busy.insert(cluster.id)
         defer { busy.remove(cluster.id) }
 
-        stopADHD(cluster)
-
-        for member in cluster.members {
-            _ = try? runLezz([
-                "run", "ocd-smoke-alarm", "ops", "stop",
-                "-pid-file", member.pidPath,
-            ], log: nil, wait: true)
+        if channel.isActive {
+            do {
+                _ = try await channel.stopIsotopes(cluster)
+            } catch {
+                lastError = error.localizedDescription
+            }
+        } else {
+            stopADHD(cluster)
+            for member in cluster.members {
+                _ = try? runLezz([
+                    "run", "ocd-smoke-alarm", "ops", "stop",
+                    "-pid-file", member.pidPath,
+                ], log: nil, wait: true)
+            }
         }
 
         var stopped = false
@@ -560,11 +630,19 @@ final class ScenarioLab {
     }
 
     func reveal(_ cluster: LabCluster) {
+        if channel.isActive {
+            Task { _ = try? await channel.reveal(cluster) }
+            return
+        }
         guard let directory = cluster.members.first?.directory else { return }
         NSWorkspace.shared.activateFileViewerSelecting([directory.deletingLastPathComponent()])
     }
 
     func revealADHD(_ cluster: LabCluster) {
+        if channel.isActive {
+            Task { _ = try? await channel.reveal(cluster) }
+            return
+        }
         guard let adhd = cluster.adhd else { return }
         if fileManager.fileExists(atPath: adhd.logURL.path) {
             NSWorkspace.shared.activateFileViewerSelecting([adhd.logURL])
@@ -759,8 +837,12 @@ final class ScenarioLab {
 
     /// One directory per scenario. `cluster.json` names the members; the app
     /// does not care who wrote it.
-    private var clustersRoot: URL {
-        let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    private var clustersRoot: URL { Self.clustersDirectory }
+
+    /// The directory cluster.json and derived configs live in. The channel
+    /// announces it to lezz.go, which confines every requested path to it.
+    static var clustersDirectory: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support.appendingPathComponent("LezzSea/Clusters", isDirectory: true)
     }
 
@@ -807,8 +889,10 @@ final class ScenarioLab {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(cluster)
+        let directory = clusterDirectory(cluster)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         try data.write(
-            to: clusterDirectory(cluster).appendingPathComponent("cluster.json"),
+            to: directory.appendingPathComponent("cluster.json"),
             options: .atomic
         )
     }
@@ -906,6 +990,7 @@ enum LabError: LocalizedError {
     case labBuildRequired
     case lezzMissing
     case launcherRejected(String)
+    case channel(String)
 
     var errorDescription: String? {
         switch self {
@@ -915,6 +1000,8 @@ enum LabError: LocalizedError {
             "lezz is not installed. Install it from the lab, then try again."
         case .launcherRejected(let message):
             "The launcher could not start the alarm: \(message)"
+        case .channel(let message):
+            "The lezz channel could not start the isotope: \(message)"
         }
     }
 }

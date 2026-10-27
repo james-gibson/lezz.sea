@@ -60,6 +60,7 @@ struct ScenariosView: View {
                                     port: cluster?.members.first.flatMap { lab.port(for: $0) },
                                     adhdSummary: cluster.flatMap { lab.adhdSummary(for: $0) },
                                     report: cluster.flatMap { lab.report(for: $0) },
+                                    canLaunch: canLaunch,
                                     busy: lab.busy.contains(scenario.id)
                                         || (cluster.map { lab.busy.contains($0.id) } ?? false),
                                     copied: copied == scenario.id,
@@ -127,45 +128,56 @@ struct ScenariosView: View {
                     .lineLimit(1)
             }
 
-            #if LAB_LAUNCHER
-            Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Launching derives a config with absolute state, rotates the isotope for mDNS and runs the alarm headless; ports are left to self-negotiate. The YAML is the source of truth.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            #else
-            Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Copy the lezz command and the adhd pairing; launching is available in the Lab build.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            #endif
+            if canLaunch {
+                Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Launching derives a config with absolute state, rotates the isotope for mDNS and runs the alarm headless — directly in the Lab build, or through the `lezz sea run` channel. The YAML is the source of truth.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("smoke-alarm’s ready-to-run configs, grouped by the theme each one exercises. Copy the lezz command and the adhd pairing; launching is available in the Lab build or when started with `lezz sea run`.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             TextField("Filter scenarios", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Filter scenarios")
                 .accessibilityIdentifier("scenarios.search")
 
-            #if LAB_LAUNCHER
-            HStack(spacing: 6) {
-                Image(systemName: "folder")
-                    .accessibilityHidden(true)
+            if canLaunch {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .accessibilityHidden(true)
 
-                Text(checkoutText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    Text(checkoutText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                Button(lab.checkout == nil ? "Choose…" : "Change…") {
-                    lab.chooseCheckout()
+                    Button(lab.checkout == nil ? "Choose…" : "Change…") {
+                        lab.chooseCheckout()
+                    }
+                    .buttonStyle(.link)
+                    .help("Choose the smoke-alarm checkout that contains configs/samples")
+                    .accessibilityIdentifier("scenarios.checkout")
                 }
-                .buttonStyle(.link)
-                .help("Choose the smoke-alarm checkout that contains configs/samples")
-                .accessibilityIdentifier("scenarios.checkout")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            #endif
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// Launching is compiled into the Lab build, and available at runtime to
+    /// any build started by `lezz sea run` (the sandbox is fine: the request
+    /// crosses a pipe, not Process).
+    private var canLaunch: Bool {
+        #if LAB_LAUNCHER
+        true
+        #else
+        LabChannel.shared.isActive
+        #endif
     }
 
     private var checkoutText: String {
@@ -212,15 +224,15 @@ struct ScenariosView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            #if LAB_LAUNCHER
-            Text("Launching runs the alarm headless on 127.0.0.1. Members keep the sample’s ports: the first process takes the federation slot and the health port, the rest self-negotiate, and the isotope name is what mDNS uses to tell them apart.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            #else
-            Text("The Sandbox build copies the command and the adhd pairing. Launching needs the Lab build, which runs outside the App Sandbox.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            #endif
+            if canLaunch {
+                Text("Launching runs the alarm headless on 127.0.0.1. The Lab build execs it directly; a sandboxed build sends the request over its lezz channel and lezz.go execs it. Either way the isotope name is what mDNS uses to tell members apart.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("This build copies the command and the adhd pairing. Launching needs the Lab build, or a launch through `lezz sea run`.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -319,6 +331,7 @@ private struct ScenarioRow: View {
     let port: Int?
     let adhdSummary: String?
     let report: WatcherReport?
+    let canLaunch: Bool
     let busy: Bool
     let copied: Bool
     let onCopy: () -> Void
@@ -360,42 +373,42 @@ private struct ScenarioRow: View {
                     StateBadge(state: state, cluster: cluster, membersUp: membersUp, port: port)
                 }
 
-                #if LAB_LAUNCHER
-                if cluster == nil {
-                    if scenario.isLaunchable {
-                        Button(action: onLaunch) {
-                            Image(systemName: "play.fill")
+                if canLaunch {
+                    if cluster == nil {
+                        if scenario.isLaunchable {
+                            Button(action: onLaunch) {
+                                Image(systemName: "play.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .help("Launch this scenario via lezz")
+                            .accessibilityLabel("Launch \(scenario.name) via lezz")
+                            .disabled(busy)
+                        } else {
+                            // A multi-process cluster is launched by the script
+                            // until the launcher's discovery is verified against
+                            // one, so the row offers the command, not a button
+                            // that would start an incomplete cluster.
+                            Button(action: onCopyScript) {
+                                Image(systemName: "terminal")
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .help("Copy the lab script command for this cluster")
+                            .accessibilityLabel("Copy the lab cluster command for \(scenario.name)")
+                            .disabled(busy)
                         }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .help("Launch this scenario via lezz")
-                        .accessibilityLabel("Launch \(scenario.name) via lezz")
-                        .disabled(busy)
                     } else {
-                        // A multi-process cluster is launched by the script
-                        // until the launcher's discovery is verified against
-                        // one, so the row offers the command, not a button
-                        // that would start an incomplete cluster.
-                        Button(action: onCopyScript) {
-                            Image(systemName: "terminal")
+                        Button(action: onStop) {
+                            Image(systemName: "stop.fill")
                         }
                         .buttonStyle(.borderless)
                         .controlSize(.small)
-                        .help("Copy the lab script command for this cluster")
-                        .accessibilityLabel("Copy the lab cluster command for \(scenario.name)")
+                        .help("Stop this cluster")
+                        .accessibilityLabel("Stop \(scenario.name)")
                         .disabled(busy)
                     }
-                } else {
-                    Button(action: onStop) {
-                        Image(systemName: "stop.fill")
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("Stop this cluster")
-                    .accessibilityLabel("Stop \(scenario.name)")
-                    .disabled(busy)
                 }
-                #endif
 
                 Button(action: onCopy) {
                     Label(
@@ -409,22 +422,22 @@ private struct ScenarioRow: View {
                 .accessibilityLabel("Copy the lezz command for \(scenario.name)")
 
                 Menu {
-                    #if LAB_LAUNCHER
-                    if cluster != nil {
-                        Button("Reveal cluster directory") { onReveal() }
-                        if cluster?.adhd != nil {
-                            Button("Reveal adhd log") { onRevealADHD() }
+                    if canLaunch {
+                        if cluster != nil {
+                            Button("Reveal cluster directory") { onReveal() }
+                            if cluster?.adhd != nil {
+                                Button("Reveal adhd log") { onRevealADHD() }
+                            }
+                            if report != nil {
+                                Button("Copy Gherkin report") { onCopyReport() }
+                            }
+                            Divider()
                         }
-                        if report != nil {
-                            Button("Copy Gherkin report") { onCopyReport() }
+                        if !scenario.isLaunchable {
+                            Button("Copy lab cluster command") { onCopyScript() }
+                            Divider()
                         }
-                        Divider()
                     }
-                    if !scenario.isLaunchable {
-                        Button("Copy lab cluster command") { onCopyScript() }
-                        Divider()
-                    }
-                    #endif
 
                     Button("Copy adhd smoke_alarm block") { onCopyADHD() }
                     Divider()

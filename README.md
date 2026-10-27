@@ -40,9 +40,12 @@ that cluster's lab can run.
   with absolute state, rotates the isotope name for mDNS, runs the alarm
   headless, learns the port it bound, pairs a headless adhd watching that port,
   scores the watcher half of adhd's Gherkin report from its log, and stops both.
+  The sandboxed build does the same when it is started by `lezz sea run`: it
+  sends the derived YAML over a private channel and lezz.go execs the alarm.
   Multi-process clusters are started by `scripts/lab-cluster.sh` until the
-  launcher's discovery has been verified against them. The sandboxed build
-  copies the command and the block instead. See `docs/scenarios.md`.
+  launcher's discovery has been verified against them. A Finder launch of the
+  sandboxed build copies the command and the block instead. See
+  `docs/scenarios.md`.
 - **Discovery.** Checks the lezz cluster registry (`:19100/cluster`), probes the
   default adhd endpoint (`127.0.0.1:9090/mcp`), and watches Bonjour for
   `_adhd-isotope._tcp`.
@@ -67,9 +70,10 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
   -configuration Debug -destination 'platform=macOS' build
 ```
 
-The default build is sandboxed, so it cannot start external processes. The
-**Lab** build is the same sources without the App Sandbox, with the launcher
-compiled in:
+The default build is sandboxed, so it cannot start external processes itself.
+Started by `lezz sea run`, it can still launch a scenario: it asks lezz.go over
+a private stdin/stdout channel and lezz.go execs the alarm. The **Lab** build is
+the same sources without the App Sandbox, with the launcher exec'ing directly:
 
 ```sh
 xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
@@ -181,8 +185,9 @@ accessible in a screenshot.
 - `ITSAppUsesNonExemptEncryption` is `false`: the app implements no
   cryptography, it only speaks HTTP/JSON to a cluster the user selected.
 - **The Lab build is not the App Store build.** It has no App Sandbox because
-  the launcher runs `lezz`; the sandboxed build compiles the launch UI out and
-  only offers the copy actions. Submit the standard build.
+  the launcher runs `lezz`. The sandboxed build keeps the launch UI but only
+  shows it when `lezz sea run` has given it a channel; a Finder launch offers
+  the copy actions. Submit the standard build.
 
 See [docs/app-store.md](docs/app-store.md) for the review checklist and the
 items that can only be completed in App Store Connect.
@@ -247,10 +252,13 @@ access to that file; subsequent launches reuse the stored bookmark.
   versus stochastic effect — with work as the source and accumulated 42i
   distance as the dose. No ionizing radiation, no radiological quantity
   (Bq, Gy, Sv), no safety function.
-- **Launching is a Lab-build feature, not a sandbox trick.** macOS refuses to
-  start an external process from the sandbox, and an SMAppService agent
-  registered by a sandboxed app must itself be sandboxed — which cannot exec
-  `lezz`. The Lab build runs it directly; the App Store build copies commands.
+- **Launching does not break the sandbox.** macOS refuses to start an external
+  process from the sandbox, and an SMAppService agent registered by a sandboxed
+  app must itself be sandboxed — which cannot exec `lezz`. The Lab build runs
+  it directly. The sandboxed build instead asks `lezz sea run`, its parent,
+  over a private stdio pipe; the request carries the derived YAML as data, and
+  lezz.go execs outside the sandbox. A Finder launch has no channel and copies
+  commands.
 - **Ports self-negotiate; identity is rotated.** The alarm already claims what
   is free: the health server scans upward on `EADDRINUSE` and advertises the
   bound port, and the federation claims the first slot in its range, so the
