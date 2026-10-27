@@ -23,7 +23,9 @@ catalog comes first.
 - Copies the adhd `smoke_alarm` block that pairs adhd with that instance — one
   entry per member of the cluster when it is running.
 - Links each row to the YAML at the commit the catalog was transcribed from.
-- In the **Lab build**, launches and stops a single-process scenario (below).
+- In the **Lab build**, or in any build started by `lezz sea run`, launches and
+  stops a single-process scenario (below). The sandboxed build sends the
+  request over a private channel; it never execs.
 - Shows any cluster described by `cluster.json`, including one a script
   started. That is deliberate: the UI is verified against a cluster it did not
   launch before it is trusted to launch multi-process clusters itself.
@@ -51,8 +53,9 @@ The row copies this block with the ports the members actually bound. adhd
 appends `/status` to each endpoint, so a federation cluster stays visible to
 adhd as more than its leader.
 
-In the **Lab build** the launcher also pairs adhd by itself: once every member
-answers, it writes `<cluster>/adhd.yaml` (the same `smoke_alarm` entries, an
+The launcher also pairs adhd by itself — directly in the Lab build, or through
+lezz.go when it was started with `lezz sea run`: once every member answers, it
+writes `<cluster>/adhd.yaml` (the same `smoke_alarm` entries, an
 `mcp_server.addr` on a free port in 9190–9289, and the checkout's
 `features/*.feature` glob), starts `adhd --headless --config <cluster>/adhd.yaml`
 with its output in `<cluster>/adhd.log`, and records the endpoint under the
@@ -99,31 +102,64 @@ Two limits are deliberate:
   instance loads the checkout's features but serves no adhd MCP traffic of its
   own, so those rows would all be NOT VERIFIABLE too.
 
-## Launching (Lab build)
+## Launching
 
 macOS refuses to start an external process from the sandbox. An SMAppService
 agent does not solve that: Apple requires a sandboxed app's agent to be
 sandboxed too, and a sandboxed agent cannot exec `lezz` (registration returns
-`Operation not permitted`). Launching is therefore compiled into the **Lab**
-build, which has no App Sandbox. The sandboxed build copies commands instead.
+`Operation not permitted`). There are two supported launch paths:
 
-The Lab launcher:
+- the **Lab build**, which has no App Sandbox and execs directly; or
+- the sandboxed build started by **`lezz sea run`**, which asks lezz.go over a
+  private stdin/stdout channel and lets lezz.go exec outside the sandbox.
+
+A Finder launch of the sandboxed build has no channel, so its rows only copy.
+
+The launcher:
 
 1. Reads the selected sample.
 2. Derives a config per member (see below).
 3. Writes `cluster.json` before starting anything, so a failed launch is still
    stoppable.
-4. Runs `lezz run ocd-smoke-alarm serve --config=<derived> --mode=headless`
-   once per member.
+4. Starts the members:
+   - Lab build: `lezz run ocd-smoke-alarm serve --config=<derived>
+     --mode=headless` once per member.
+   - Channel: sends `{want:"start", cluster, members:[{name, config}]}`. The
+     YAML travels as data; lezz.go writes it under
+     `~/.lezz/sea/Clusters/<slug>/member-N/config.yaml`, creates the state
+     directory, and runs the same `serve --mode=headless` argv there.
 5. Asks the federation root `<base_port>/membership` whether the cluster is
    whole, and finds the health port each member bound by scanning loopback
    upward from the preferred port and accepting a port only when `/status`
    names that member's isotope. The mDNS advertisement is used when it answers;
    loopback does not depend on the local-network permission mDNS needs.
-6. Writes and starts a paired adhd (see above) once every member answers, and
-   records its endpoint in `cluster.json`.
-7. Stops adhd and then the alarms: `lezz run ocd-smoke-alarm ops stop -pid-file
-   <pid>` per member.
+6. Pairs adhd (see above) once every member answers:
+   - Lab build: writes and starts `<cluster>/adhd.yaml`.
+   - Channel: sends `{want:"adhd", slug, healthPorts, gherkinDirectory}`;
+     lezz.go picks the free port in 9190–9289, writes the config and starts
+     adhd. The reply carries the endpoint and file paths recorded in
+     `cluster.json`.
+7. Stops adhd and then the alarms. The Lab build runs `lezz run
+   ocd-smoke-alarm ops stop -pid-file <pid>`; the channel sends `{want:"stop",
+   cluster}` and lezz.go stops the processes and removes their pid files.
+
+### Why the channel carries the YAML
+
+The app's own container is not its lab. TCC keeps other processes out of
+`~/Library/Containers/co.jamesgibson.LezzSea`, so lezz.go cannot read a config the
+app wrote there, and an alarm started by lezz.go could not write its state
+there either. The request therefore carries the derived YAML itself; lezz.go
+owns `~/.lezz/sea/Clusters`, writes the config and state under it, and the app
+keeps only `cluster.json` in its container for display. The row's
+`Reveal` action is a channel request because the paths are outside the app's
+sandbox. A Finder launch (no channel) drops a `cluster.json` whose configs live
+under `~/.lezz/sea`: that build cannot stop what lezz.go started. Launch through
+`lezz sea run` to see and stop it.
+
+The channel is not a general remote control. The app sends a cluster slug and
+derived YAML, never a binary or argv; the supervisor's verbs are `start`,
+`stop`, `adhd` and `reveal`, and it rejects a config whose runtime paths are not
+under its lab root. See lezz.go's `internal/sea` for the wire shape.
 
 ### Ports are not moved; identity is rotated
 
@@ -225,9 +261,9 @@ The script:
   `member-<n>/alarm.log` says which port failed.
 - `npx`/`uvx` targets need a useful PATH; the launcher prepends
   `/opt/homebrew/bin` and `/usr/local/bin`.
-- adhd pairing is written and launched by the app in the Lab build, and recorded
-  in `cluster.json`; `scripts/lab-cluster.sh --pair-adhd` does the same from
-  outside it. The row then scores the **watcher** half of `scanner.go`'s report
+- adhd pairing is written and launched by the app in the Lab build, or by
+  lezz.go in channel mode, and recorded in `cluster.json`;
+  `scripts/lab-cluster.sh --pair-adhd` does the same from outside either. The row then scores the **watcher** half of `scanner.go`'s report
   from the paired adhd's log (below). The MCP-request half is not shown: it
   needs adhd's own `features/adhd/*.feature`, which a paired instance does not
   load, so it would report only NOT VERIFIABLE.
@@ -273,5 +309,7 @@ xcodebuild -project LezzSea.xcodeproj -scheme LezzSea \
 
 The first test asserts that the Scenarios row reads `:5100 · 3/3` from the
 script's cluster. The second launches a single-process scenario through the
-app, waits for the bound port, and stops it. Both skip in the sandboxed build,
-which cannot see launcher clusters.
+app, waits for the bound port, and stops it. Both skip in the sandboxed build
+the UI tests launch: that build has no channel, so it cannot launch, and it does
+not see the script's cluster. The sandboxed app started by `lezz sea run` does
+launch (through the channel), but the UI tests do not start it that way.

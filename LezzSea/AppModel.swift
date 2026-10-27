@@ -210,6 +210,11 @@ final class AppModel {
         startTail()
         bonjour.start()
 
+        // Started by `lezz sea run`, the app has a private pipe to lezz.go and
+        // can ask it for isotopes. A Finder launch has no channel and stays a
+        // viewer.
+        LabChannel.shared.start(clustersRoot: ScenarioLab.clustersDirectory)
+
         await discover()
         startMonitor()
     }
