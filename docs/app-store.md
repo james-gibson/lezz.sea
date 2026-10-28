@@ -12,7 +12,7 @@ record of the manual steps so a submission is not blocked on discovery.
 | Outbound network (adhd, registry, Bonjour) | `com.apple.security.network.client` |
 | Read the traffic log | `com.apple.security.files.user-selected.read-only` + security-scoped bookmark in `AppModel.setLogURL` |
 | Local network purpose string | `NSLocalNetworkUsageDescription` in `Info.plist` |
-| Bonjour service declaration | `NSBonjourServices` (`_adhd-isotope._tcp`) |
+| Bonjour service declaration | `NSBonjourServices` (`_adhd-isotope._tcp`, `_smoke-alarm._tcp`), browsed with `NWBrowser` |
 | Privacy manifest | `LezzSea/PrivacyInfo.xcprivacy` — UserDefaults, reason `CA92.1`; no tracking, no collected data |
 | Export compliance | `ITSAppUsesNonExemptEncryption = false` |
 | ATS for loopback / LAN | `NSAllowsLocalNetworking` |
