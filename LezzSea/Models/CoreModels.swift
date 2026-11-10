@@ -40,7 +40,10 @@ struct ClusterStatus: Decodable, Hashable {
     let clusterPeers: [String]?
     let paths: Int?
     let dynamicTools: Int?
-    let tick: String?
+    /// adhd's public linear-time tick: `floor(unix_seconds / 5)`, sent as a
+    /// JSON number (`uint64`). A number cannot decode into `String?`, which is
+    /// what dropped the whole status call for every cluster (lezz.sea#15).
+    let tick: Int64?
 }
 
 struct LightsResponse: Decodable {
