@@ -61,6 +61,33 @@ struct DecodingTests {
         #expect(FlexibleDate.parse("2026-10-15T23:26:40.687Z") != nil)
         #expect(FlexibleDate.parse("2026-10-15T23:26:40Z") != nil)
     }
+
+    /// lezz.sea#15: adhd.status's `tick` is a JSON number, so it must decode
+    /// into a numeric field. A captured body carries `spec_fidelity` too; it is
+    /// ignored by the model, and that is pinned here — an extra key must not
+    /// break the envelope.
+    @Test func decodesStatusWithNumericTick() throws {
+        let json = #"""
+        {"jsonrpc":"2.0","id":1,"result":{
+          "cluster_peers":[],
+          "dynamic_tools":2,
+          "instance":"adhd",
+          "isotope":"iso-42",
+          "lights":{"dark":0,"green":3,"red":4,"total":7,"yellow":0},
+          "paths":0,
+          "spec_fidelity":{"average":0,"callers":[]},
+          "tick":358712899
+        }}
+        """#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        struct Envelope: Decodable { let result: ClusterStatus? }
+        let envelope = try decoder.decode(Envelope.self, from: Data(json.utf8))
+        let status = try #require(envelope.result)
+        #expect(status.tick == 358712899)
+        #expect(status.lights?.green == 3)
+        #expect(status.instance == "adhd")
+    }
 }
 
 struct TrafficEventTests {
